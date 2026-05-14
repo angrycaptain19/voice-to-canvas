@@ -24,8 +24,7 @@
  *   route that performs the same header injection.
  *   e.g. set  VITE_DEEPGRAM_PROXY_URL=/api/deepgram  in your hosting env.
  */
-export const DEEPGRAM_PROXY_URL: string =
-  import.meta.env.VITE_DEEPGRAM_PROXY_URL ?? '/api/deepgram'
+export const DEEPGRAM_PROXY_URL: string = import.meta.env.VITE_DEEPGRAM_PROXY_URL ?? '/api/deepgram'
 
 /**
  * Convenience: build the full URL for Deepgram's streaming STT WebSocket.
@@ -34,9 +33,7 @@ export const DEEPGRAM_PROXY_URL: string =
  *   const wsUrl = deepgramStreamUrl({ model: 'nova-2', language: 'en-US' })
  *   const socket = new WebSocket(wsUrl)
  */
-export function deepgramStreamUrl(
-  params: Record<string, string> = {},
-): string {
+export function deepgramStreamUrl(params: Record<string, string> = {}): string {
   const query = new URLSearchParams({ model: 'nova-2', ...params }).toString()
   // In development the Vite proxy upgrades ws:// to wss:// transparently.
   const base = DEEPGRAM_PROXY_URL.replace(/\/$/, '')

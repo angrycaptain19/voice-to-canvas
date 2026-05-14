@@ -16,6 +16,18 @@
  *     error:             VoiceError | null
  *   }
  *
+ * ## Streaming / auto-restart behaviour
+ *
+ * Recognition runs in `continuous` mode.  After a final result fires, if no
+ * new speech arrives within SILENCE_TIMEOUT_MS the recognition is
+ * soft-reset (stop → onend → restart) so the next utterance gets a clean
+ * session.  The user can fully deactivate the mic by calling `stop()` (Space
+ * bar second press), which sets `wantListeningRef = false` so the onend
+ * handler does NOT restart.
+ *
+ * After a very long silence (LONG_SILENCE_TIMEOUT_MS with no interim
+ * transcript) the mic is fully closed to prevent battery drain.
+ *
  * Browser support
  * ---------------
  *   Chrome / Edge  — Web Speech API fully supported
@@ -57,6 +69,22 @@ interface SpeechRecognitionInstance extends EventTarget {
 }
 
 type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/**
+ * After a final result, if no new speech arrives within this window the
+ * recognition is soft-restarted so the next sentence gets a clean session.
+ */
+const SILENCE_TIMEOUT_MS = 1500
+
+/**
+ * If there has been absolutely no interim or final speech for this long the
+ * mic is fully closed (wantListeningRef false) to prevent battery drain.
+ */
+const LONG_SILENCE_TIMEOUT_MS = 10_000
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -140,9 +168,36 @@ export function useVoiceTranscript(): [VoiceTranscriptState, UseVoiceTranscriptA
 
   // Stable ref to the recognition instance so it persists across renders
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
-  // Track whether we are intentionally stopping to suppress the onend
-  // side-effect that would otherwise reset state prematurely
-  const intentionalStopRef = useRef(false)
+
+  // Track whether the user *wants* to be listening.
+  // true  - start() was called; onend will auto-restart recognition.
+  // false - stop() was called by the user; onend will NOT restart.
+  const wantListeningRef = useRef(false)
+
+  // Silence timer: after a final result, soft-restart if no new speech within
+  // SILENCE_TIMEOUT_MS.
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Long-silence timer: fully close mic if nothing heard for LONG_SILENCE_TIMEOUT_MS.
+  const longSilenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // ---------------------------------------------------------------------------
+  // Timer helpers
+  // ---------------------------------------------------------------------------
+
+  const clearSilenceTimer = useCallback(() => {
+    if (silenceTimerRef.current !== null) {
+      clearTimeout(silenceTimerRef.current)
+      silenceTimerRef.current = null
+    }
+  }, [])
+
+  const clearLongSilenceTimer = useCallback(() => {
+    if (longSilenceTimerRef.current !== null) {
+      clearTimeout(longSilenceTimerRef.current)
+      longSilenceTimerRef.current = null
+    }
+  }, [])
 
   // ---------------------------------------------------------------------------
   // Create recognition instance
@@ -162,13 +217,27 @@ export function useVoiceTranscript(): [VoiceTranscriptState, UseVoiceTranscriptA
 
     // onstart
     r.onstart = () => {
-      intentionalStopRef.current = false
       setState({
         status: 'listening',
         interimTranscript: '',
         finalTranscript: '',
         error: null,
       })
+
+      // Start the long-silence guard.  Any speech activity will reset it.
+      clearLongSilenceTimer()
+      longSilenceTimerRef.current = setTimeout(() => {
+        // No speech at all for LONG_SILENCE_TIMEOUT_MS - fully close mic.
+        wantListeningRef.current = false
+        const recognition = recognitionRef.current
+        if (recognition) {
+          try {
+            recognition.stop()
+          } catch {
+            // ignore
+          }
+        }
+      }, LONG_SILENCE_TIMEOUT_MS)
     }
 
     // onresult
@@ -186,8 +255,22 @@ export function useVoiceTranscript(): [VoiceTranscriptState, UseVoiceTranscriptA
         }
       }
 
+      // Any speech activity resets the long-silence guard.
+      clearLongSilenceTimer()
+      longSilenceTimerRef.current = setTimeout(() => {
+        wantListeningRef.current = false
+        const recognition = recognitionRef.current
+        if (recognition) {
+          try {
+            recognition.stop()
+          } catch {
+            // ignore
+          }
+        }
+      }, LONG_SILENCE_TIMEOUT_MS)
+
       if (latestFinal) {
-        // A final result arrived — commit it and clear interim
+        // A final result arrived - commit it and clear interim.
         setState((prev) => ({
           ...prev,
           status: 'listening',
@@ -195,8 +278,26 @@ export function useVoiceTranscript(): [VoiceTranscriptState, UseVoiceTranscriptA
           finalTranscript: latestFinal,
           error: null,
         }))
+
+        // Arm the silence timer: if no new speech within SILENCE_TIMEOUT_MS,
+        // soft-restart recognition so the next utterance gets a clean session.
+        clearSilenceTimer()
+        silenceTimerRef.current = setTimeout(() => {
+          const recognition = recognitionRef.current
+          if (recognition && wantListeningRef.current) {
+            // Soft stop - onend will restart because wantListeningRef stays true.
+            try {
+              recognition.stop()
+            } catch {
+              // ignore
+            }
+          }
+        }, SILENCE_TIMEOUT_MS)
       } else {
-        // Only interim update
+        // Only interim update - disarm the post-final silence timer because
+        // the user is still speaking.
+        clearSilenceTimer()
+
         setState((prev) => ({
           ...prev,
           status: 'listening',
@@ -208,8 +309,11 @@ export function useVoiceTranscript(): [VoiceTranscriptState, UseVoiceTranscriptA
 
     // onerror
     r.onerror = (event: SpeechRecognitionErrorEvent) => {
-      // 'aborted' is raised when we call stop() ourselves — suppress it
+      // 'aborted' is raised when we call stop() ourselves - suppress it
       if (event.error === 'aborted') return
+
+      // 'no-speech' during a soft-restart is benign; restart if still wanted.
+      if (event.error === 'no-speech' && wantListeningRef.current) return
 
       const voiceError = mapSpeechError(event.error)
 
@@ -223,15 +327,32 @@ export function useVoiceTranscript(): [VoiceTranscriptState, UseVoiceTranscriptA
 
     // onend
     r.onend = () => {
-      if (intentionalStopRef.current) {
-        // We stopped deliberately — transition to idle, keep finalTranscript
+      clearSilenceTimer()
+      clearLongSilenceTimer()
+
+      if (wantListeningRef.current) {
+        // Auto-restart: user still wants to be listening (soft reset between
+        // utterances, or browser-initiated end).
         setState((prev) => ({
           ...prev,
-          status: 'idle',
           interimTranscript: '',
+          // Keep status as 'listening' so the badge stays active.
+          status: 'listening',
         }))
+
+        // Restart recognition asynchronously to allow the engine to reset.
+        setTimeout(() => {
+          const recognition = recognitionRef.current
+          if (recognition && wantListeningRef.current) {
+            try {
+              recognition.start()
+            } catch {
+              // Already started (e.g. StrictMode double-invoke) - ignore.
+            }
+          }
+        }, 0)
       } else {
-        // Recognition ended on its own (silence timeout, connection drop)
+        // User explicitly stopped (or long-silence timeout) - go idle.
         setState((prev) => {
           if (prev.status === 'error') return prev
           return {
@@ -245,7 +366,7 @@ export function useVoiceTranscript(): [VoiceTranscriptState, UseVoiceTranscriptA
 
     recognitionRef.current = r
     return r
-  }, [])
+  }, [clearSilenceTimer, clearLongSilenceTimer])
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -267,8 +388,10 @@ export function useVoiceTranscript(): [VoiceTranscriptState, UseVoiceTranscriptA
     const recognition = getOrCreateRecognition()
     if (!recognition) return
 
+    // Signal that we want to be listening - onend will auto-restart if needed.
+    wantListeningRef.current = true
+
     try {
-      intentionalStopRef.current = false
       recognition.start()
     } catch {
       // InvalidStateError is thrown if start() is called while already running.
@@ -280,14 +403,18 @@ export function useVoiceTranscript(): [VoiceTranscriptState, UseVoiceTranscriptA
     const recognition = recognitionRef.current
     if (!recognition) return
 
-    intentionalStopRef.current = true
+    // Signal that the user explicitly wants to stop - onend will NOT restart.
+    wantListeningRef.current = false
+    clearSilenceTimer()
+    clearLongSilenceTimer()
+
     // Use stop() (not abort()) so any pending results are delivered first
     try {
       recognition.stop()
     } catch {
       // May throw if already stopped
     }
-  }, [])
+  }, [clearSilenceTimer, clearLongSilenceTimer])
 
   // ---------------------------------------------------------------------------
   // Cleanup on unmount
@@ -295,6 +422,9 @@ export function useVoiceTranscript(): [VoiceTranscriptState, UseVoiceTranscriptA
 
   useEffect(() => {
     return () => {
+      clearSilenceTimer()
+      clearLongSilenceTimer()
+
       const recognition = recognitionRef.current
       if (recognition) {
         // Null out handlers before aborting to prevent state updates on
@@ -311,7 +441,7 @@ export function useVoiceTranscript(): [VoiceTranscriptState, UseVoiceTranscriptA
         recognitionRef.current = null
       }
     }
-  }, [])
+  }, [clearSilenceTimer, clearLongSilenceTimer])
 
   return [state, { start, stop }]
 }

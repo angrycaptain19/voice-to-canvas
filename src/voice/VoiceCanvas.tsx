@@ -235,12 +235,23 @@ export function VoiceCanvas(): React.ReactElement {
     [setToastError],
   )
 
-  // Trigger the pipeline whenever a final transcript arrives and we are idle
+  // Trigger the pipeline whenever a committed sentence arrives.
+  //
+  // In streaming mode the recognition stays open (status remains 'listening'),
+  // so we fire on every finalTranscript change rather than waiting for
+  // status === 'idle'.  We also handle the legacy idle case so the pipeline
+  // still runs if the user manually stops before a sentence fires.
+  //
+  // `status` is intentionally omitted from the dependency array — we only
+  // want to re-run when the transcript itself changes.  The dedup guard
+  // (lastParsedTranscriptRef) prevents double-execution if both a
+  // finalTranscript update and a status change fire for the same sentence.
   useEffect(() => {
-    if (status === 'idle' && finalTranscript) {
+    if (finalTranscript && (status === 'listening' || status === 'idle')) {
       void runPipeline(finalTranscript)
     }
-  }, [status, finalTranscript, runPipeline])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finalTranscript, runPipeline])
 
   // Clear command feedback & dedup guard when user starts a new recording
   useEffect(() => {

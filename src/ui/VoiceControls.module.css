@@ -180,6 +180,15 @@
   border-color: rgba(252, 165, 165, 0.3);
 }
 
+.statusBadge.statusIdle {
+  /* Subtle hint badge when mic is inactive */
+  background: rgba(30, 41, 59, 0.55);
+  color: #94a3b8;
+  border-color: rgba(255, 255, 255, 0.06);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
 @keyframes vcBadgeDot {
   0%,
   100% {

@@ -1,0 +1,39 @@
+# ── Dependencies ──────────────────────────────────────────────────────────────
+node_modules/
+
+# ── Build output ──────────────────────────────────────────────────────────────
+dist/
+dist-ssr/
+build/
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+# .env contains API keys and must NEVER be committed.
+# Use .env.example (checked in) as the template.
+.env
+.env.local
+.env.*.local
+
+# ── Vite / tooling cache ──────────────────────────────────────────────────────
+.vite/
+*.local
+
+# ── Editor / OS artefacts ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── TypeScript ────────────────────────────────────────────────────────────────
+*.tsbuildinfo

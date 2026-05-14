@@ -572,3 +572,62 @@ describe('parseVoiceCommand -- grammar fast-path (no network)', () => {
     expect(cmd).toMatchObject({ intent: 'STYLE_SHAPE', color: 'orange' })
   })
 })
+
+// ─── 21. CREATE_SHAPE bare-noun fast path ─────────────────────────────────────
+
+describe('CREATE_SHAPE bare-noun fast path', () => {
+  it('"circle" → CREATE_SHAPE { shapeType: "circle" }', () => {
+    expect(grammar('circle')).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'circle' })
+  })
+
+  it('"a circle" → CREATE_SHAPE { shapeType: "circle" }', () => {
+    expect(grammar('a circle')).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'circle' })
+  })
+
+  it('"red circle" → CREATE_SHAPE { shapeType: "circle", color: "red" }', () => {
+    expect(grammar('red circle')).toMatchObject({
+      intent: 'CREATE_SHAPE',
+      shapeType: 'circle',
+      color: 'red',
+    })
+  })
+
+  it('"circle please" → CREATE_SHAPE { shapeType: "circle" }', () => {
+    expect(grammar('circle please')).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'circle' })
+  })
+
+  it('"new rectangle" → CREATE_SHAPE { shapeType: "rectangle" }', () => {
+    expect(grammar('new rectangle')).toMatchObject({
+      intent: 'CREATE_SHAPE',
+      shapeType: 'rectangle',
+    })
+  })
+
+  it('"another star" → CREATE_SHAPE { shapeType: "star" }', () => {
+    expect(grammar('another star')).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'star' })
+  })
+
+  it('"large blue triangle" → CREATE_SHAPE with color and size', () => {
+    expect(grammar('large blue triangle')).toMatchObject({
+      intent: 'CREATE_SHAPE',
+      shapeType: 'triangle',
+      color: 'blue',
+      size: 'large',
+    })
+  })
+
+  it('"the circle" → CREATE_SHAPE { shapeType: "circle" }', () => {
+    expect(grammar('the circle')).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'circle' })
+  })
+
+  it('"one rectangle" → CREATE_SHAPE { shapeType: "rectangle" }', () => {
+    expect(grammar('one rectangle')).toMatchObject({
+      intent: 'CREATE_SHAPE',
+      shapeType: 'rectangle',
+    })
+  })
+
+  it('"ok circle" → CREATE_SHAPE { shapeType: "circle" }', () => {
+    expect(grammar('ok circle')).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'circle' })
+  })
+})

@@ -352,7 +352,7 @@ export function matchGrammar(transcript: string, rawTranscript: string): ShapeCo
     }
   }
 
-  // 17. CREATE_SHAPE
+  // 17. CREATE_SHAPE — explicit verb prefix
   if (/^(?:draw|add|create|insert|put|place|make)\b/i.test(t)) {
     const shapeType = extractShape(t)
     if (shapeType !== undefined) {
@@ -366,6 +366,51 @@ export function matchGrammar(transcript: string, rawTranscript: string): ShapeCo
         ...(size !== undefined ? { size } : {}),
         ...(position !== undefined ? { position } : {}),
         rawTranscript,
+      }
+    }
+  }
+
+  // 18. CREATE_SHAPE — bare noun phrase (no verb required)
+  //
+  // Handles common STT output patterns where users name a shape directly,
+  // optionally preceded by an article / colour / size / "new" / "another",
+  // or followed by filler words like "please".
+  //
+  // Examples that resolve here (not matched by rule 17 above):
+  //   "circle"               -> CREATE_SHAPE { shapeType: 'circle' }
+  //   "a circle"             -> CREATE_SHAPE { shapeType: 'circle' }
+  //   "red circle"           -> CREATE_SHAPE { shapeType: 'circle', color: 'red' }
+  //   "circle please"        -> CREATE_SHAPE { shapeType: 'circle' }
+  //   "new rectangle"        -> CREATE_SHAPE { shapeType: 'rectangle' }
+  //   "another star"         -> CREATE_SHAPE { shapeType: 'star' }
+  //   "large blue triangle"  -> CREATE_SHAPE { shapeType: 'triangle', color: 'blue', size: 'large' }
+  {
+    const shapeType = extractShape(t)
+    if (shapeType !== undefined) {
+      // Only treat as a bare-noun CREATE if the transcript is short enough that
+      // it is clearly just a shape name (with optional qualifiers).  We guard
+      // against accidentally swallowing longer sentences that should fall to the
+      // LLM (e.g. "give it the shape of a triangle").
+      // Strategy: strip known qualifiers + the shape word and check that what
+      // remains is only filler (articles, "new", "another", "please", "now", etc.).
+      const FILLER_RE = /^(\s*(a|an|the|new|another|one|please|now|here|there|ok|okay)\s*)*$/i
+      const stripped = t
+        .replace(new RegExp('\\b(' + SHAPE_PATTERN + ')\\b', 'i'), '')
+        .replace(new RegExp('\\b(' + COLOR_PATTERN + ')\\b', 'i'), '')
+        .replace(new RegExp('\\b(' + SIZE_PATTERN + ')\\b', 'i'), '')
+        .trim()
+      if (FILLER_RE.test(stripped)) {
+        const color = extractColor(t)
+        const size = extractSize(t)
+        const position = extractPosition(t)
+        return {
+          intent: 'CREATE_SHAPE',
+          shapeType,
+          ...(color !== undefined ? { color } : {}),
+          ...(size !== undefined ? { size } : {}),
+          ...(position !== undefined ? { position } : {}),
+          rawTranscript,
+        }
       }
     }
   }

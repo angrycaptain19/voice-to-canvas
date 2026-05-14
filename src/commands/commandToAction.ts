@@ -44,5 +44,6 @@ export function commandToAction(cmd: ShapeCommand): TldrawAction {
     ...(cmd.factor !== undefined && { factor: cmd.factor }),
     ...(cmd.steps !== undefined && { steps: cmd.steps }),
     ...(cmd.timestamp !== undefined && { timestamp: cmd.timestamp }),
+    ...(cmd.shapeReference !== undefined && { shapeReference: cmd.shapeReference }),
   } as TldrawAction
 }

@@ -31,7 +31,11 @@ import {
   toRichText,
 } from 'tldraw'
 
-import type { ShapeColor, ShapePosition, ShapeSize, ShapeType, TldrawAction } from '../types'
+import type { ShapeColor, ShapePosition, ShapeSize, ShapeType, TldrawAction, ShapeReference } from '../types'
+import { resolveShapeReference } from './resolveShapeReference'
+import type { ShapeRef } from './resolveShapeReference'
+import { createVoiceError } from '../voice/errors'
+import type { VoiceError } from '../voice/errors'
 
 // ---------------------------------------------------------------------------
 // Size constants
@@ -120,16 +124,74 @@ function resolvePosition(
   }
 }
 
-function resolveTargetIds(editor: Editor, targetId?: string): TLShapeId[] {
-  if (targetId) return [targetId as TLShapeId]
-  return editor.getSelectedShapeIds()
+/**
+ * Build a ShapeRef from an action's shapeReference field, falling back to
+ * selection-based targeting when no shapeReference is present.
+ */
+function buildShapeRef(
+  shapeReference: ShapeReference | undefined,
+  explicitTargetId: string | undefined,
+): ShapeRef {
+  if (explicitTargetId) {
+    // Explicit programmatic ID — we'll handle it before calling the resolver
+    return {}
+  }
+  if (shapeReference) {
+    return {
+      shapeType: shapeReference.shapeType,
+      color: shapeReference.color,
+      size: shapeReference.size,
+      ordinal: shapeReference.ordinal,
+      label: shapeReference.label,
+      spatial: shapeReference.spatial,
+      useSelection: shapeReference.useSelection,
+    }
+  }
+  // No shapeReference and no explicit ID → fall back to current selection
+  return { useSelection: true }
+}
+
+/**
+ * Resolve a shape action's target IDs using the resolver, with a hard
+ * explicit-targetId fast path for programmatic callers.
+ *
+ * Returns the resolved IDs (may be empty if kind === 'none') **and** an
+ * optional VoiceError to surface to the user when resolution fails or is
+ * ambiguous.
+ */
+function resolveTargetIds(
+  editor: Editor,
+  shapeReference: ShapeReference | undefined,
+  explicitTargetId: string | undefined,
+): { ids: TLShapeId[]; error?: VoiceError } {
+  // 1. Explicit ID always wins (programmatic callers)
+  if (explicitTargetId) {
+    return { ids: [explicitTargetId as TLShapeId] }
+  }
+
+  const ref = buildShapeRef(shapeReference, explicitTargetId)
+  const result = resolveShapeReference(editor, ref)
+
+  if (result.kind === 'found') {
+    return { ids: result.ids }
+  }
+
+  if (result.kind === 'ambiguous') {
+    // Operate on all ambiguous candidates and surface a toast
+    const error = createVoiceError('AMBIGUOUS_TARGET')
+    return { ids: result.candidates, error }
+  }
+
+  // result.kind === 'none' — nothing matched
+  const error = createVoiceError('NO_SHAPE_MATCH')
+  return { ids: [], error }
 }
 
 // ---------------------------------------------------------------------------
 // Main executor
 // ---------------------------------------------------------------------------
 
-export function executeTldrawAction(editor: Editor, action: TldrawAction): void {
+export function executeTldrawAction(editor: Editor, action: TldrawAction): VoiceError | undefined {
   switch (action.type) {
     case 'CREATE_SHAPE':
       return handleCreateShape(editor, action)
@@ -147,32 +209,34 @@ export function executeTldrawAction(editor: Editor, action: TldrawAction): void 
       return handleDeleteShape(editor, action)
 
     case 'DELETE_ALL':
-      return handleDeleteAll(editor)
+      handleDeleteAll(editor)
+      return undefined
 
     case 'STYLE_SHAPE':
       return handleStyleShape(editor, action)
 
     case 'SELECT_SHAPE':
-      return handleSelectShape(editor, action)
+      handleSelectShape(editor, action)
+      return undefined
 
     case 'SELECT_ALL':
       editor.selectAll()
-      return
+      return undefined
 
     case 'DESELECT':
       editor.setSelectedShapes([])
-      return
+      return undefined
 
     case 'UNDO': {
       const steps = action.steps ?? 1
       for (let i = 0; i < steps; i++) editor.undo()
-      return
+      return undefined
     }
 
     case 'REDO': {
       const steps = action.steps ?? 1
       for (let i = 0; i < steps; i++) editor.redo()
-      return
+      return undefined
     }
 
     case 'RECORD_KEYFRAME':
@@ -180,7 +244,7 @@ export function executeTldrawAction(editor: Editor, action: TldrawAction): void 
     case 'PAUSE':
     case 'STOP':
     case 'SEEK':
-      return
+      return undefined
 
     default: {
       void (action as never)
@@ -195,7 +259,7 @@ export function executeTldrawAction(editor: Editor, action: TldrawAction): void 
 function handleCreateShape(
   editor: Editor,
   action: Extract<TldrawAction, { type: 'CREATE_SHAPE' }>,
-): void {
+): undefined {
   const size = action.size ?? 'medium'
   const w = SIZE_PX[size]
   const h = SIZE_PX[size]
@@ -282,9 +346,9 @@ function handleCreateShape(
 function handleMoveShape(
   editor: Editor,
   action: Extract<TldrawAction, { type: 'MOVE_SHAPE' }>,
-): void {
-  const ids = resolveTargetIds(editor, action.targetId)
-  if (ids.length === 0) return
+): VoiceError | undefined {
+  const { ids, error } = resolveTargetIds(editor, action.shapeReference, action.targetId)
+  if (ids.length === 0) return error
 
   for (const id of ids) {
     const shape = editor.getShape(id)
@@ -307,14 +371,15 @@ function handleMoveShape(
 
     editor.updateShapes([{ id, type: shape.type, x: newX, y: newY }])
   }
+  return error
 }
 
 function handleResizeShape(
   editor: Editor,
   action: Extract<TldrawAction, { type: 'RESIZE_SHAPE' }>,
-): void {
-  const ids = resolveTargetIds(editor, action.targetId)
-  if (ids.length === 0) return
+): VoiceError | undefined {
+  const { ids, error } = resolveTargetIds(editor, action.shapeReference, action.targetId)
+  if (ids.length === 0) return error
 
   for (const id of ids) {
     const shape = editor.getShape(id)
@@ -343,28 +408,31 @@ function handleResizeShape(
       editor.resizeShape(id, { x: newW / bounds.w, y: newH / bounds.h })
     }
   }
+  return error
 }
 
 function handleRotateShape(
   editor: Editor,
   action: Extract<TldrawAction, { type: 'ROTATE_SHAPE' }>,
-): void {
-  const ids = resolveTargetIds(editor, action.targetId)
-  if (ids.length === 0) return
+): VoiceError | undefined {
+  const { ids, error } = resolveTargetIds(editor, action.shapeReference, action.targetId)
+  if (ids.length === 0) return error
 
   const angleDeg = action.angle ?? 90
   const angleRad = (angleDeg * Math.PI) / 180
 
   editor.rotateShapesBy(ids, angleRad)
+  return error
 }
 
 function handleDeleteShape(
   editor: Editor,
   action: Extract<TldrawAction, { type: 'DELETE_SHAPE' }>,
-): void {
-  const ids = resolveTargetIds(editor, action.targetId)
-  if (ids.length === 0) return
+): VoiceError | undefined {
+  const { ids, error } = resolveTargetIds(editor, action.shapeReference, action.targetId)
+  if (ids.length === 0) return error
   editor.deleteShapes(ids)
+  return error
 }
 
 function handleDeleteAll(editor: Editor): void {
@@ -376,11 +444,11 @@ function handleDeleteAll(editor: Editor): void {
 function handleStyleShape(
   editor: Editor,
   action: Extract<TldrawAction, { type: 'STYLE_SHAPE' }>,
-): void {
-  if (!action.color) return
+): VoiceError | undefined {
+  if (!action.color) return undefined
 
   const tldrawColor = toTldrawColor(action.color)
-  const ids = resolveTargetIds(editor, action.targetId)
+  const { ids, error } = resolveTargetIds(editor, action.shapeReference, action.targetId)
 
   if (ids.length > 0) {
     editor.setSelectedShapes(ids)
@@ -388,6 +456,7 @@ function handleStyleShape(
   }
 
   editor.setStyleForNextShapes(DefaultColorStyle, tldrawColor as never)
+  return error
 }
 
 function handleSelectShape(

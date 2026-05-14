@@ -157,4 +157,32 @@ describe('commandToAction', () => {
     // Only type and shapeType should be present; no undefined keys
     expect(Object.keys(action).sort()).toEqual(['shapeType', 'type'])
   })
+
+  it('passes shapeReference through for targeting commands', () => {
+    const cmd: ShapeCommand = {
+      intent: 'MOVE_SHAPE',
+      dx: 50,
+      shapeReference: { shapeType: 'circle', color: 'red' },
+      rawTranscript: 'move the red circle to the right',
+    }
+    const action = commandToAction(cmd)
+    expect(action).toEqual({
+      type: 'MOVE_SHAPE',
+      dx: 50,
+      shapeReference: { shapeType: 'circle', color: 'red' },
+    })
+  })
+
+  it('passes shapeReference with ordinal through for DELETE_SHAPE', () => {
+    const cmd: ShapeCommand = {
+      intent: 'DELETE_SHAPE',
+      shapeReference: { shapeType: 'star', ordinal: 'last' },
+      rawTranscript: 'delete the last star',
+    }
+    const action = commandToAction(cmd)
+    expect(action).toEqual({
+      type: 'DELETE_SHAPE',
+      shapeReference: { shapeType: 'star', ordinal: 'last' },
+    })
+  })
 })

@@ -27,6 +27,8 @@
  * | PARSE_FAILURE             | Transcript didn't match any known command    |
  * | LLM_FALLBACK_ERROR        | GPT-4o-mini call failed                      |
  * | DEEPGRAM_CONNECTION_ERROR | WebSocket to the Deepgram proxy failed       |
+ * | NO_SHAPE_MATCH            | Resolver found no shape matching the ref     |
+ * | AMBIGUOUS_TARGET          | Resolver found multiple equally-scored shapes|
  * | UNKNOWN                   | Any other / unexpected error                 |
  */
 export type VoiceErrorCode =
@@ -37,6 +39,8 @@ export type VoiceErrorCode =
   | 'PARSE_FAILURE'
   | 'LLM_FALLBACK_ERROR'
   | 'DEEPGRAM_CONNECTION_ERROR'
+  | 'NO_SHAPE_MATCH'
+  | 'AMBIGUOUS_TARGET'
   | 'UNKNOWN'
 
 // ─── Error value type ─────────────────────────────────────────────────────────
@@ -80,6 +84,10 @@ export const VOICE_ERROR_MESSAGES: {
 
   DEEPGRAM_CONNECTION_ERROR:
     'Could not connect to speech recognition \u2014 check your network and retry',
+
+  NO_SHAPE_MATCH: "Couldn't find a matching shape \u2014 try selecting it first",
+
+  AMBIGUOUS_TARGET: 'Found multiple matching shapes \u2014 operating on all of them',
 
   UNKNOWN: 'Something went wrong \u2014 please try again',
 }

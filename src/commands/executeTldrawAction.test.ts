@@ -16,8 +16,20 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { TLShapeId } from 'tldraw'
 import { executeTldrawAction } from './executeTldrawAction'
 import type { TldrawAction } from '../types'
+
+// ---------------------------------------------------------------------------
+// Mock resolveShapeReference so executor tests are isolated from the resolver
+// ---------------------------------------------------------------------------
+
+vi.mock('./resolveShapeReference', () => ({
+  resolveShapeReference: vi.fn(),
+}))
+
+import { resolveShapeReference } from './resolveShapeReference'
+const mockResolveShapeReference = vi.mocked(resolveShapeReference)
 
 // ---------------------------------------------------------------------------
 // Editor mock
@@ -67,7 +79,7 @@ function makeMockEditor(overrides?: Record<string, unknown>) {
 type MockEditor = ReturnType<typeof makeMockEditor>
 
 function run(editor: MockEditor, action: TldrawAction) {
-  executeTldrawAction(editor as never, action)
+  return executeTldrawAction(editor as never, action)
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +309,8 @@ describe('MOVE_SHAPE', () => {
     editor = makeMockEditor()
     editor.getSelectedShapeIds.mockReturnValue(['shape:test-geo'])
     editor.getShape.mockReturnValue(MOCK_SHAPE_GEO)
+    // Default: resolver returns the selected shape
+    mockResolveShapeReference.mockReturnValue({ kind: 'found', ids: ['shape:test-geo' as TLShapeId] })
   })
 
   it('applies dx/dy relative to current position', () => {
@@ -333,11 +347,62 @@ describe('MOVE_SHAPE', () => {
     expect(updates[0].id).toBe('shape:specific')
   })
 
-  it('does nothing when no target and selection is empty', () => {
-    editor.getSelectedShapeIds.mockReturnValue([])
+  it('does nothing when resolver returns none (no matching shape)', () => {
+    mockResolveShapeReference.mockReturnValue({ kind: 'none' })
     run(editor, { type: 'MOVE_SHAPE', dx: 50 })
 
     expect(editor.updateShapes).not.toHaveBeenCalled()
+  })
+
+  it('calls resolver with useSelection:true when no shapeReference provided', () => {
+    run(editor, { type: 'MOVE_SHAPE', dx: 10 })
+
+    expect(mockResolveShapeReference).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ useSelection: true }),
+    )
+  })
+
+  it('calls resolver with shapeReference fields when provided', () => {
+    mockResolveShapeReference.mockReturnValue({ kind: 'found', ids: ['shape:test-geo' as TLShapeId] })
+    run(editor, {
+      type: 'MOVE_SHAPE',
+      dx: 20,
+      shapeReference: { shapeType: 'circle', color: 'red' },
+    })
+
+    expect(mockResolveShapeReference).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ shapeType: 'circle', color: 'red' }),
+    )
+    expect(editor.updateShapes).toHaveBeenCalledOnce()
+  })
+
+  it('returns NO_SHAPE_MATCH error when resolver returns none', () => {
+    mockResolveShapeReference.mockReturnValue({ kind: 'none' })
+    const result = run(editor, { type: 'MOVE_SHAPE', dx: 10 })
+
+    expect(result?.code).toBe('NO_SHAPE_MATCH')
+    expect(editor.updateShapes).not.toHaveBeenCalled()
+  })
+
+  it('moves all candidates and returns AMBIGUOUS_TARGET when resolver is ambiguous', () => {
+    const candidateId1 = 'shape:candidate-1'
+    const candidateId2 = 'shape:candidate-2'
+    mockResolveShapeReference.mockReturnValue({
+      kind: 'ambiguous',
+      candidates: [candidateId1 as TLShapeId, candidateId2 as TLShapeId],
+    })
+    editor.getShape.mockImplementation((id: string) => ({
+      ...MOCK_SHAPE_GEO,
+      id,
+      x: 10,
+      y: 10,
+    }))
+    const result = run(editor, { type: 'MOVE_SHAPE', dx: 5 })
+
+    expect(result?.code).toBe('AMBIGUOUS_TARGET')
+    expect(editor.updateShapes).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -353,6 +418,8 @@ describe('RESIZE_SHAPE', () => {
     editor.getSelectedShapeIds.mockReturnValue(['shape:test-geo'])
     editor.getShape.mockReturnValue(MOCK_SHAPE_GEO)
     editor.getShapePageBounds.mockReturnValue({ x: 50, y: 50, w: 200, h: 200 })
+    // Default: resolver returns the selected shape
+    mockResolveShapeReference.mockReturnValue({ kind: 'found', ids: ['shape:test-geo' as TLShapeId] })
   })
 
   it('resizes to named size bucket (large = 400 px)', () => {
@@ -416,8 +483,8 @@ describe('RESIZE_SHAPE', () => {
     expect(updates[0].id).toBe('shape:explicit')
   })
 
-  it('does nothing when selection is empty and no targetId', () => {
-    editor.getSelectedShapeIds.mockReturnValue([])
+  it('does nothing when resolver returns none (no matching shape)', () => {
+    mockResolveShapeReference.mockReturnValue({ kind: 'none' })
     run(editor, { type: 'RESIZE_SHAPE', size: 'large' })
 
     expect(editor.updateShapes).not.toHaveBeenCalled()
@@ -434,6 +501,8 @@ describe('ROTATE_SHAPE', () => {
   beforeEach(() => {
     editor = makeMockEditor()
     editor.getSelectedShapeIds.mockReturnValue(['shape:test-geo'])
+    // Default: resolver returns the selected shape
+    mockResolveShapeReference.mockReturnValue({ kind: 'found', ids: ['shape:test-geo' as TLShapeId] })
   })
 
   it('rotates by given angle in degrees (converted to radians)', () => {
@@ -458,11 +527,26 @@ describe('ROTATE_SHAPE', () => {
     expect(ids).toContain('shape:abc')
   })
 
-  it('does nothing when no selection and no targetId', () => {
-    editor.getSelectedShapeIds.mockReturnValue([])
+  it('does nothing when resolver returns none (no matching shape)', () => {
+    mockResolveShapeReference.mockReturnValue({ kind: 'none' })
     run(editor, { type: 'ROTATE_SHAPE', angle: 90 })
 
     expect(editor.rotateShapesBy).not.toHaveBeenCalled()
+  })
+
+  it('calls resolver with shapeReference when provided', () => {
+    mockResolveShapeReference.mockReturnValue({ kind: 'found', ids: ['shape:test-geo' as TLShapeId] })
+    run(editor, {
+      type: 'ROTATE_SHAPE',
+      angle: 45,
+      shapeReference: { shapeType: 'rectangle' },
+    })
+
+    expect(mockResolveShapeReference).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ shapeType: 'rectangle' }),
+    )
+    expect(editor.rotateShapesBy).toHaveBeenCalledOnce()
   })
 })
 
@@ -476,6 +560,8 @@ describe('DELETE_SHAPE', () => {
   beforeEach(() => {
     editor = makeMockEditor()
     editor.getSelectedShapeIds.mockReturnValue(['shape:test-geo'])
+    // Default: resolver returns the selected shape
+    mockResolveShapeReference.mockReturnValue({ kind: 'found', ids: ['shape:test-geo' as TLShapeId] })
   })
 
   it('deletes the currently selected shapes', () => {
@@ -493,11 +579,32 @@ describe('DELETE_SHAPE', () => {
     expect(ids).toEqual(['shape:specific'])
   })
 
-  it('does nothing when selection is empty and no targetId', () => {
-    editor.getSelectedShapeIds.mockReturnValue([])
+  it('does nothing when resolver returns none (no matching shape)', () => {
+    mockResolveShapeReference.mockReturnValue({ kind: 'none' })
     run(editor, { type: 'DELETE_SHAPE' })
 
     expect(editor.deleteShapes).not.toHaveBeenCalled()
+  })
+
+  it('calls resolver with shapeReference when provided', () => {
+    mockResolveShapeReference.mockReturnValue({ kind: 'found', ids: ['shape:test-geo' as TLShapeId] })
+    run(editor, {
+      type: 'DELETE_SHAPE',
+      shapeReference: { shapeType: 'star' },
+    })
+
+    expect(mockResolveShapeReference).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ shapeType: 'star' }),
+    )
+    expect(editor.deleteShapes).toHaveBeenCalledOnce()
+  })
+
+  it('returns NO_SHAPE_MATCH error when resolver returns none', () => {
+    mockResolveShapeReference.mockReturnValue({ kind: 'none' })
+    const result = run(editor, { type: 'DELETE_SHAPE' })
+
+    expect(result?.code).toBe('NO_SHAPE_MATCH')
   })
 })
 
@@ -547,6 +654,8 @@ describe('STYLE_SHAPE', () => {
   beforeEach(() => {
     editor = makeMockEditor()
     editor.getSelectedShapeIds.mockReturnValue(['shape:test-geo'])
+    // Default: resolver returns the selected shape
+    mockResolveShapeReference.mockReturnValue({ kind: 'found', ids: ['shape:test-geo' as TLShapeId] })
   })
 
   it('sets color on selected shapes', () => {

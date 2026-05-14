@@ -4,38 +4,30 @@
  * Top-level composition that wires together:
  *   - tldraw canvas (full viewport)
  *   - useVoiceTranscript hook
- *   - MicButton (toggle mode by default; hold-to-talk can be enabled)
- *   - VoiceOverlay (live transcript display)
+ *   - VoiceControls (mic button, transcript overlay, status badge, feedback toast)
  *   - VoiceErrorToast (error feedback)
- *
- * Keyboard shortcut
- * -----------------
- *   Space (when not in a text input) toggles listening on/off.
+ *   - parseVoiceCommand (parser) -- invoked when a final transcript arrives
  */
 
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Tldraw } from 'tldraw'
 import 'tldraw/tldraw.css'
 
 import { useVoiceTranscript } from './useVoiceTranscript'
-import { MicButton } from './MicButton'
-import { VoiceOverlay } from './VoiceOverlay'
 import { VoiceErrorToast } from './VoiceErrorToast'
 import { useVoiceError } from './useVoiceError'
-import { createVoiceError } from './errors'
-import type { VoiceError as TypesVoiceError } from '../types'
+import { createVoiceError, isVoiceError } from './errors'
 import type { VoiceErrorCode } from './errors'
+import { VoiceControls } from '../ui/VoiceControls'
+import { parseVoiceCommand } from '../commands/parseVoiceCommand'
+import type { ShapeCommand } from '../types'
+import type { VoiceError as TypesVoiceError } from '../types'
 
 // ---------------------------------------------------------------------------
 // Error code mapping
 // ---------------------------------------------------------------------------
 
-/**
- * Map from the VoiceError codes defined in src/types/voice.ts to the
- * VoiceErrorCode union in src/voice/errors.ts so the toast system can
- * display the correct copy.
- */
 function mapTypesErrorCodeToToastCode(code: TypesVoiceError['code']): VoiceErrorCode {
   switch (code) {
     case 'PERMISSION_DENIED':
@@ -54,15 +46,59 @@ function mapTypesErrorCodeToToastCode(code: TypesVoiceError['code']): VoiceError
 }
 
 // ---------------------------------------------------------------------------
+// Human-readable command feedback
+// ---------------------------------------------------------------------------
+
+function commandToFeedbackLabel(cmd: ShapeCommand): string {
+  const color = cmd.color ? cmd.color + ' ' : ''
+  const shape = cmd.shapeType ?? 'shape'
+
+  switch (cmd.intent) {
+    case 'CREATE_SHAPE':
+      return 'Created ' + color + shape
+    case 'DELETE_SHAPE':
+      return 'Deleted selection'
+    case 'DELETE_ALL':
+      return 'Cleared canvas'
+    case 'MOVE_SHAPE':
+      return 'Moved shape'
+    case 'RESIZE_SHAPE':
+      return 'Resized shape'
+    case 'ROTATE_SHAPE':
+      return 'Rotated shape'
+    case 'STYLE_SHAPE':
+      return 'Styled ' + color + shape
+    case 'SELECT_SHAPE':
+      return 'Selected ' + color + shape
+    case 'SELECT_ALL':
+      return 'Selected all'
+    case 'DESELECT':
+      return 'Deselected'
+    case 'UNDO':
+      return 'Undo'
+    case 'REDO':
+      return 'Redo'
+    case 'RECORD_KEYFRAME':
+      return 'Recorded keyframe'
+    case 'PLAY':
+      return 'Play'
+    case 'PAUSE':
+      return 'Pause'
+    case 'STOP':
+      return 'Stop'
+    case 'SEEK':
+      return cmd.timestamp !== undefined ? 'Seek to ' + cmd.timestamp + 's' : 'Seek'
+    default:
+      return cmd.rawTranscript
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
+/** @deprecated -- pass nothing; the hybrid hold/toggle gesture is internal. */
 export interface VoiceCanvasProps {
-  /**
-   * Interaction mode for the mic button.
-   * 'toggle' (default) — click once to start, click again to stop
-   * 'hold'             — hold to record, release to commit
-   */
   micMode?: 'toggle' | 'hold'
 }
 
@@ -75,25 +111,11 @@ const rootStyle: CSSProperties = {
   inset: 0,
 }
 
-const toolbarStyle: CSSProperties = {
-  position: 'fixed',
-  bottom: '1.5rem',
-  left: '50%',
-  transform: 'translateX(-50%)',
-  zIndex: 9500,
-  display: 'flex',
-  alignItems: 'center',
-  gap: '0.75rem',
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-/**
- * Full-viewport canvas with integrated voice capture toolbar.
- */
-export function VoiceCanvas({ micMode = 'toggle' }: VoiceCanvasProps): React.ReactElement {
+export function VoiceCanvas(): React.ReactElement {
   const [transcriptState, { start, stop }] = useVoiceTranscript()
   const { error: toastError, setError: setToastError, clearError } = useVoiceError()
 
@@ -109,39 +131,57 @@ export function VoiceCanvas({ micMode = 'toggle' }: VoiceCanvasProps): React.Rea
     }
   }, [error, setToastError, clearError])
 
-  // Keyboard shortcut: Space toggles listening
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
-        return
-      }
-      if (e.code === 'Space' && !e.repeat) {
-        e.preventDefault()
-        if (status === 'listening') {
-          stop()
-        } else if (status === 'idle') {
-          start()
+  // Parse final transcript and generate command feedback
+  const lastParsedTranscriptRef = useRef<string>('')
+  const [commandFeedback, setCommandFeedback] = useState<string | null>(null)
+
+  const runParser = useCallback(
+    async (transcript: string) => {
+      if (!transcript || transcript === lastParsedTranscriptRef.current) return
+      lastParsedTranscriptRef.current = transcript
+
+      try {
+        const cmd = await parseVoiceCommand(transcript)
+        setCommandFeedback(commandToFeedbackLabel(cmd))
+      } catch (err) {
+        if (isVoiceError(err)) {
+          setToastError(err)
+        } else {
+          setToastError(createVoiceError('UNKNOWN'))
         }
+        setCommandFeedback(null)
       }
     },
-    [status, start, stop],
+    [setToastError],
   )
 
   useEffect(() => {
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleKeyDown])
+    if (status === 'idle' && finalTranscript) {
+      void runParser(finalTranscript)
+    }
+  }, [status, finalTranscript, runParser])
+
+  // Clear command feedback when user starts a new recording
+  useEffect(() => {
+    if (status === 'listening') {
+      lastParsedTranscriptRef.current = ''
+      setCommandFeedback(null)
+    }
+  }, [status])
 
   return (
     <div style={rootStyle}>
       <Tldraw />
 
-      <VoiceOverlay status={status} interim={interimTranscript} final={finalTranscript} />
-
-      <div style={toolbarStyle}>
-        <MicButton status={status} onStart={start} onStop={stop} mode={micMode} />
-      </div>
+      <VoiceControls
+        status={status}
+        interim={interimTranscript}
+        final={finalTranscript}
+        error={error}
+        onStart={start}
+        onStop={stop}
+        commandFeedback={commandFeedback}
+      />
 
       <VoiceErrorToast
         error={toastError}

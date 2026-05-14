@@ -20,3 +20,4 @@
 
 export { parseVoiceCommand, matchGrammar, llmFallback } from './parseVoiceCommand'
 export type { ShapeCommand } from '../types'
+export { executeTldrawAction } from './executeTldrawAction'

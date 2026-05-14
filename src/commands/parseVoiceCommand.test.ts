@@ -631,3 +631,158 @@ describe('CREATE_SHAPE bare-noun fast path', () => {
     expect(grammar('ok circle')).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'circle' })
   })
 })
+
+// ─── 22. shapeReference fields ───────────────────────────────────────────────
+
+describe('shapeReference: MOVE_SHAPE with color', () => {
+  it('move the red circle to the top → shapeReference includes color and shapeType', () => {
+    const cmd = grammar('move the red circle to the top')
+    expect(cmd).toMatchObject({
+      intent: 'MOVE_SHAPE',
+      position: 'top',
+      shapeReference: { shapeType: 'circle', color: 'red' },
+    })
+  })
+
+  it('drag the blue rectangle to the bottom-left → shapeReference includes color', () => {
+    const cmd = grammar('drag the blue rectangle to the bottom-left')
+    expect(cmd).toMatchObject({
+      intent: 'MOVE_SHAPE',
+      position: 'bottom-left',
+      shapeReference: { shapeType: 'rectangle', color: 'blue' },
+    })
+  })
+
+  it('move the circle to the center (no color) → shapeReference has shapeType only', () => {
+    const cmd = grammar('move the circle to the center')
+    expect(cmd).toMatchObject({
+      intent: 'MOVE_SHAPE',
+      position: 'center',
+      shapeReference: { shapeType: 'circle' },
+    })
+    expect(cmd?.shapeReference?.color).toBeUndefined()
+  })
+
+  it('move the second star to the right → shapeReference has ordinal:2', () => {
+    const cmd = grammar('move the second star to the right')
+    expect(cmd).toMatchObject({
+      intent: 'MOVE_SHAPE',
+      position: 'right',
+      shapeReference: { shapeType: 'star', ordinal: 2 },
+    })
+  })
+})
+
+describe('shapeReference: DELETE_SHAPE', () => {
+  it('delete the last shape → shapeReference: { ordinal: "last" }', () => {
+    const cmd = grammar('delete the last shape')
+    expect(cmd).toMatchObject({
+      intent: 'DELETE_SHAPE',
+      shapeReference: { ordinal: 'last' },
+    })
+  })
+
+  it('delete the first circle → shapeReference: { shapeType: "circle", ordinal: "first" }', () => {
+    const cmd = grammar('delete the first circle')
+    expect(cmd).toMatchObject({
+      intent: 'DELETE_SHAPE',
+      shapeReference: { shapeType: 'circle', ordinal: 'first' },
+    })
+  })
+
+  it('delete the big blue star → shapeReference: { shapeType: "star", color: "blue", size: "large" }', () => {
+    const cmd = grammar('delete the big blue star')
+    expect(cmd).toMatchObject({
+      intent: 'DELETE_SHAPE',
+      shapeReference: { shapeType: 'star', color: 'blue', size: 'large' },
+    })
+  })
+
+  it('remove the second rectangle → shapeReference: { shapeType: "rectangle", ordinal: 2 }', () => {
+    const cmd = grammar('remove the second rectangle')
+    expect(cmd).toMatchObject({
+      intent: 'DELETE_SHAPE',
+      shapeReference: { shapeType: 'rectangle', ordinal: 2 },
+    })
+  })
+
+  it('erase the latest shape → shapeReference: { ordinal: "last" }', () => {
+    const cmd = grammar('erase the latest shape')
+    expect(cmd).toMatchObject({
+      intent: 'DELETE_SHAPE',
+      shapeReference: { ordinal: 'last' },
+    })
+  })
+})
+
+describe('shapeReference: ROTATE_SHAPE', () => {
+  it('rotate the first triangle 90 degrees → shapeReference: { shapeType: "triangle", ordinal: "first" }', () => {
+    const cmd = grammar('rotate the first triangle 90 degrees')
+    expect(cmd).toMatchObject({
+      intent: 'ROTATE_SHAPE',
+      angle: 90,
+      shapeReference: { shapeType: 'triangle', ordinal: 'first' },
+    })
+  })
+
+  it('rotate the blue circle 45 degrees → shapeReference: { shapeType: "circle", color: "blue" }', () => {
+    const cmd = grammar('rotate the blue circle 45 degrees')
+    expect(cmd).toMatchObject({
+      intent: 'ROTATE_SHAPE',
+      angle: 45,
+      shapeReference: { shapeType: 'circle', color: 'blue' },
+    })
+  })
+
+  it('rotate with no shapeReference qualifiers → shapeReference is undefined', () => {
+    const cmd = grammar('rotate it 90 degrees')
+    expect(cmd).toMatchObject({ intent: 'ROTATE_SHAPE', angle: 90 })
+    expect(cmd?.shapeReference).toBeUndefined()
+  })
+})
+
+describe('shapeReference: RESIZE_SHAPE', () => {
+  it('resize the selected shape to large → shapeReference: { useSelection: true }', () => {
+    const cmd = grammar('resize the selected shape to large')
+    expect(cmd).toMatchObject({
+      intent: 'RESIZE_SHAPE',
+      size: 'large',
+      shapeReference: { useSelection: true },
+    })
+  })
+
+  it('resize the blue rectangle to small → shapeReference: { shapeType: "rectangle", color: "blue" }', () => {
+    const cmd = grammar('resize the blue rectangle to small')
+    expect(cmd).toMatchObject({
+      intent: 'RESIZE_SHAPE',
+      size: 'small',
+      shapeReference: { shapeType: 'rectangle', color: 'blue' },
+    })
+  })
+
+  it('make it bigger (no qualifier) → no shapeReference', () => {
+    const cmd = grammar('make it bigger')
+    expect(cmd).toMatchObject({ intent: 'RESIZE_SHAPE', factor: 1.5 })
+    expect(cmd?.shapeReference).toBeUndefined()
+  })
+})
+
+describe('shapeReference: STYLE_SHAPE two-color disambiguation', () => {
+  it('make the red circle blue → STYLE_SHAPE color:blue shapeReference:{shapeType:"circle", color:"red"}', () => {
+    const cmd = grammar('make the red circle blue')
+    expect(cmd).toMatchObject({
+      intent: 'STYLE_SHAPE',
+      color: 'blue',
+      shapeReference: { shapeType: 'circle', color: 'red' },
+    })
+  })
+
+  it('change the green rectangle to orange → STYLE_SHAPE color:orange shapeReference:{shapeType:"rectangle", color:"green"}', () => {
+    const cmd = grammar('change the green rectangle to orange')
+    expect(cmd).toMatchObject({
+      intent: 'STYLE_SHAPE',
+      color: 'orange',
+      shapeReference: { shapeType: 'rectangle', color: 'green' },
+    })
+  })
+})

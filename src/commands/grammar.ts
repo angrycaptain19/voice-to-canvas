@@ -13,7 +13,7 @@
  * @module
  */
 
-import type { ShapeColor, ShapeCommand, ShapePosition, ShapeSize, ShapeType } from '../types'
+import type { ShapeColor, ShapeCommand, ShapePosition, ShapeReference, ShapeSize, ShapeType } from '../types'
 
 // ─── Vocabulary maps ──────────────────────────────────────────────────────────
 
@@ -111,6 +111,21 @@ function extractColor(text: string): ShapeColor | undefined {
   return m ? COLOR_MAP[m[1].toLowerCase()] : undefined
 }
 
+/**
+ * Extract all color mentions from text in left-to-right order.
+ * Used by STYLE_SHAPE to distinguish the target color from the new style color.
+ */
+function extractAllColors(text: string): ShapeColor[] {
+  const re = new RegExp(`\\b(${COLOR_PATTERN})\\b`, 'gi')
+  const results: ShapeColor[] = []
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    const color = COLOR_MAP[m[1].toLowerCase()]
+    if (color !== undefined) results.push(color)
+  }
+  return results
+}
+
 function extractSize(text: string): ShapeSize | undefined {
   const re = new RegExp(`\\b(${SIZE_PATTERN})\\b`, 'i')
   const m = re.exec(text)
@@ -171,6 +186,44 @@ function extractTimestamp(text: string): number | undefined {
   return undefined
 }
 
+/**
+ * Extract an ordinal qualifier ('first', 'last', 'latest', or an integer >= 2)
+ * from a transcript.
+ *
+ * Examples:
+ *   "delete the last shape"      -> 'last'
+ *   "rotate the first triangle"  -> 'first'
+ *   "move the second circle"     -> 2
+ *   "delete the third star"      -> 3
+ */
+function extractOrdinal(text: string): ShapeReference['ordinal'] {
+  if (/\b(last|latest|most\s+recent)\b/i.test(text)) return 'last'
+  if (/\b(first)\b/i.test(text)) return 'first'
+  const m = /\b(second|third|fourth|fifth)\b/i.exec(text)
+  if (m) {
+    return ({ second: 2, third: 3, fourth: 4, fifth: 5 } as Record<string, number>)[
+      m[1].toLowerCase()
+    ]
+  }
+  return undefined
+}
+
+/**
+ * Build a compact ShapeReference object, omitting undefined fields.
+ * Returns undefined if all fields are undefined.
+ */
+function buildShapeReference(fields: ShapeReference): ShapeReference | undefined {
+  const ref: ShapeReference = {}
+  if (fields.shapeType !== undefined) ref.shapeType = fields.shapeType
+  if (fields.color !== undefined) ref.color = fields.color
+  if (fields.size !== undefined) ref.size = fields.size
+  if (fields.ordinal !== undefined) ref.ordinal = fields.ordinal
+  if (fields.label !== undefined) ref.label = fields.label
+  if (fields.spatial !== undefined) ref.spatial = fields.spatial
+  if (fields.useSelection !== undefined) ref.useSelection = fields.useSelection
+  return Object.keys(ref).length > 0 ? ref : undefined
+}
+
 // ─── Main grammar matcher ─────────────────────────────────────────────────────
 
 /**
@@ -213,9 +266,14 @@ export function matchGrammar(transcript: string, rawTranscript: string): ShapeCo
   // 6. DELETE_SHAPE
   if (/^(?:delete|remove|erase|clear)\b/i.test(t)) {
     const shapeType = extractShape(t)
+    const color = extractColor(t)
+    const size = extractSize(t)
+    const ordinal = extractOrdinal(t)
+    const shapeReference = buildShapeReference({ shapeType, color, size, ordinal })
     return {
       intent: 'DELETE_SHAPE',
       ...(shapeType !== undefined ? { shapeType } : {}),
+      ...(shapeReference !== undefined ? { shapeReference } : {}),
       rawTranscript,
     }
   }
@@ -268,10 +326,14 @@ export function matchGrammar(transcript: string, rawTranscript: string): ShapeCo
   if (/^(?:rotate|turn|spin|flip)\b/i.test(t)) {
     const angle = extractAngle(t)
     const shapeType = extractShape(t)
+    const color = extractColor(t)
+    const ordinal = extractOrdinal(t)
+    const shapeReference = buildShapeReference({ shapeType, color, ordinal })
     return {
       intent: 'ROTATE_SHAPE',
       ...(shapeType !== undefined ? { shapeType } : {}),
       ...(angle !== undefined ? { angle } : {}),
+      ...(shapeReference !== undefined ? { shapeReference } : {}),
       rawTranscript,
     }
   }
@@ -291,24 +353,44 @@ export function matchGrammar(transcript: string, rawTranscript: string): ShapeCo
       return undefined
     })()
     const shapeType = extractShape(t)
+    const color = extractColor(t)
+    const ordinal = extractOrdinal(t)
+    // Check for "selected" / "selection" keywords -> useSelection
+    const useSelection = /\b(?:selected|selection|current)\b/i.test(t) ? true : undefined
+    const shapeReference = buildShapeReference({ shapeType, color, ordinal, useSelection })
     return {
       intent: 'RESIZE_SHAPE',
       ...(shapeType !== undefined ? { shapeType } : {}),
       ...(size !== undefined ? { size } : {}),
       ...(factor !== undefined ? { factor } : {}),
+      ...(shapeReference !== undefined ? { shapeReference } : {}),
       rawTranscript,
     }
   }
 
-  // 14. STYLE_SHAPE — verbs: make, change, color, set, use, give
+  // 14. STYLE_SHAPE -- verbs: make, change, color, set, use, give
   if (/^(?:make|change|color|set|use|give)\b/i.test(t)) {
-    // "make a circle" is CREATE_SHAPE — guard against false positives
+    // "make a circle" is CREATE_SHAPE -- guard against false positives
     const isCreate =
       /\b(?:a|an)\s+(?:\w+\s+)*(?:circle|ellipse|rectangle|triangle|arrow|line|star|text|frame|square|oval|box)\b/i.test(
         t,
       )
     if (!isCreate) {
-      const color = extractColor(t)
+      const allColors = extractAllColors(t)
+      if (allColors.length >= 2) {
+        // "make the red circle blue" -- first color = target identifier, last = new style
+        const targetColor = allColors[0]
+        const newColor = allColors[allColors.length - 1]
+        const shapeType = extractShape(t)
+        const shapeReference = buildShapeReference({ shapeType, color: targetColor })
+        return {
+          intent: 'STYLE_SHAPE',
+          color: newColor,
+          ...(shapeReference !== undefined ? { shapeReference } : {}),
+          rawTranscript,
+        }
+      }
+      const color = allColors[0]
       if (color !== undefined) {
         return { intent: 'STYLE_SHAPE', color, rawTranscript }
       }
@@ -330,11 +412,15 @@ export function matchGrammar(transcript: string, rawTranscript: string): ShapeCo
   if (/^(?:move|drag|shift|reposition|snap)\b/i.test(t)) {
     const position = extractPosition(t)
     const shapeType = extractShape(t)
+    const color = extractColor(t)
+    const ordinal = extractOrdinal(t)
+    const shapeReference = buildShapeReference({ shapeType, color, ordinal })
     if (position !== undefined) {
       return {
         intent: 'MOVE_SHAPE',
         ...(shapeType !== undefined ? { shapeType } : {}),
         position,
+        ...(shapeReference !== undefined ? { shapeReference } : {}),
         rawTranscript,
       }
     }
@@ -352,7 +438,7 @@ export function matchGrammar(transcript: string, rawTranscript: string): ShapeCo
     }
   }
 
-  // 17. CREATE_SHAPE — explicit verb prefix
+  // 17. CREATE_SHAPE -- explicit verb prefix
   if (/^(?:draw|add|create|insert|put|place|make)\b/i.test(t)) {
     const shapeType = extractShape(t)
     if (shapeType !== undefined) {
@@ -370,7 +456,7 @@ export function matchGrammar(transcript: string, rawTranscript: string): ShapeCo
     }
   }
 
-  // 18. CREATE_SHAPE — bare noun phrase (no verb required)
+  // 18. CREATE_SHAPE -- bare noun phrase (no verb required)
   //
   // Handles common STT output patterns where users name a shape directly,
   // optionally preceded by an article / colour / size / "new" / "another",

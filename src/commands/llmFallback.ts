@@ -6,15 +6,15 @@
  *
  * Uses Anthropic tool use so the model is forced to return a value that
  * can be validated against ShapeCommandSchema. The response is validated through
- * Zod before being returned — the function never emits unvalidated data.
+ * Zod before being returned -- the function never emits unvalidated data.
  *
  * Environment:
- *   VITE_ANTHROPIC_API_KEY — client-side key (Vite exposes VITE_* vars to the
+ *   VITE_ANTHROPIC_API_KEY -- client-side key (Vite exposes VITE_* vars to the
  *                            browser bundle; use a server proxy in production)
  *
  * Error handling:
- *   • Network / API errors  -> throws createVoiceError('LLM_FALLBACK_ERROR')
- *   • Schema parse failure  -> returns null (caller falls through to PARSE_FAILURE)
+ *   * Network / API errors  -> throws createVoiceError('LLM_FALLBACK_ERROR')
+ *   * Schema parse failure  -> returns null (caller falls through to PARSE_FAILURE)
  *
  * @module
  */
@@ -59,17 +59,17 @@ const PARSE_COMMAND_FUNCTION = {
       shapeType: {
         type: 'string',
         enum: ['circle', 'ellipse', 'rectangle', 'triangle', 'arrow', 'line', 'star', 'text', 'frame'],
-        description: 'Shape type for CREATE_SHAPE / SELECT_SHAPE / DELETE_SHAPE.',
+        description: 'Shape type for CREATE_SHAPE / SELECT_SHAPE. For targeting commands use shapeReference.shapeType instead.',
       },
       color: {
         type: 'string',
         enum: ['red', 'blue', 'green', 'orange', 'yellow', 'violet', 'grey', 'black', 'white'],
-        description: 'Shape color. Map "purple" to "violet", "gray" to "grey".',
+        description: 'Shape color for CREATE_SHAPE or the NEW style color for STYLE_SHAPE. Map "purple" to "violet", "gray" to "grey". For identifying the TARGET shape use shapeReference.color.',
       },
       size: {
         type: 'string',
         enum: ['small', 'medium', 'large', 'xl'],
-        description: 'Logical size bucket.',
+        description: 'Logical size bucket (the new size for RESIZE_SHAPE, or the size attribute for CREATE_SHAPE).',
       },
       position: {
         type: 'string',
@@ -100,6 +100,58 @@ const PARSE_COMMAND_FUNCTION = {
       timestamp: {
         type: 'number',
         description: 'Timeline timestamp in milliseconds for SEEK / RECORD_KEYFRAME / PLAY.',
+      },
+      shapeReference: {
+        type: 'object',
+        description:
+          'Discriminator fields that identify WHICH existing shape(s) the command targets. ' +
+          'Use for MOVE_SHAPE, DELETE_SHAPE, STYLE_SHAPE, ROTATE_SHAPE, RESIZE_SHAPE. ' +
+          'Examples: ' +
+          '"move the red circle to the top" -> shapeReference: { shapeType: "circle", color: "red" }. ' +
+          '"delete the last shape" -> shapeReference: { ordinal: "last" }. ' +
+          '"delete the big blue star" -> shapeReference: { shapeType: "star", color: "blue", size: "large" }. ' +
+          '"rotate the first triangle 90 degrees" -> shapeReference: { shapeType: "triangle", ordinal: "first" }. ' +
+          '"resize the selected shape to large" -> shapeReference: { useSelection: true }. ' +
+          '"make the red circle blue" -> shapeReference: { shapeType: "circle", color: "red" } and top-level color: "blue".',
+        properties: {
+          shapeType: {
+            type: 'string',
+            enum: ['circle', 'ellipse', 'rectangle', 'triangle', 'arrow', 'line', 'star', 'text', 'frame'],
+            description: 'Type of the target shape.',
+          },
+          color: {
+            type: 'string',
+            enum: ['red', 'blue', 'green', 'orange', 'yellow', 'violet', 'grey', 'black', 'white'],
+            description: 'Color used to identify the target shape (NOT the new style color).',
+          },
+          size: {
+            type: 'string',
+            enum: ['small', 'medium', 'large', 'xl'],
+            description: 'Size used to identify the target shape.',
+          },
+          ordinal: {
+            description:
+              'Ordinal position: "first", "last", "latest", or an integer >= 1 (e.g. 2 for "second").',
+            oneOf: [
+              { type: 'string', enum: ['first', 'last', 'latest'] },
+              { type: 'integer', minimum: 1 },
+            ],
+          },
+          label: {
+            type: 'string',
+            description: 'Text label of the target shape.',
+          },
+          spatial: {
+            type: 'string',
+            enum: ['center', 'top', 'bottom', 'left', 'right', 'top-left', 'top-right', 'bottom-left', 'bottom-right'],
+            description: 'Named canvas position used to spatially identify the target shape.',
+          },
+          useSelection: {
+            type: 'boolean',
+            description: 'When true, the command targets the current editor selection.',
+          },
+        },
+        additionalProperties: false,
       },
       rawTranscript: {
         type: 'string',
@@ -135,10 +187,23 @@ Position mapping:
   "lower left" -> "bottom-left" | "lower right" -> "bottom-right"
   "middle" -> "center"
 
+Shape reference (shapeReference) -- use for MOVE_SHAPE, DELETE_SHAPE, STYLE_SHAPE, ROTATE_SHAPE, RESIZE_SHAPE:
+  When the user refers to an existing shape by its properties, populate shapeReference with
+  those identifying fields so the resolver can find the right shape.
+  - "move the red circle to the top"      -> intent:MOVE_SHAPE, shapeReference:{shapeType:"circle", color:"red"}, position:"top"
+  - "delete the last shape"               -> intent:DELETE_SHAPE, shapeReference:{ordinal:"last"}
+  - "delete the big blue star"            -> intent:DELETE_SHAPE, shapeReference:{shapeType:"star", color:"blue", size:"large"}
+  - "rotate the first triangle 90 deg"   -> intent:ROTATE_SHAPE, shapeReference:{shapeType:"triangle", ordinal:"first"}, angle:90
+  - "resize the selected shape to large"  -> intent:RESIZE_SHAPE, shapeReference:{useSelection:true}, size:"large"
+  - "make the red circle blue"            -> intent:STYLE_SHAPE, shapeReference:{shapeType:"circle", color:"red"}, color:"blue"
+    (note: shapeReference.color identifies the TARGET; top-level color is the NEW style)
+
 Rules:
 - Only include fields that are explicitly mentioned in the command.
 - Always set rawTranscript to the original transcript string.
-- For undo/redo: extract the number of steps if mentioned, otherwise omit steps.`
+- For undo/redo: extract the number of steps if mentioned, otherwise omit steps.
+- For STYLE_SHAPE with two colors: first color = identifies the target (shapeReference.color),
+  last/second color = the new style (top-level color field).`
 
 // ─── Lazy Anthropic client ────────────────────────────────────────────────────
 
@@ -151,7 +216,7 @@ function getClient(): Anthropic {
 
   if (!apiKey) {
     throw createVoiceError('LLM_FALLBACK_ERROR', {
-      message: 'VITE_ANTHROPIC_API_KEY is not set — cannot call the LLM fallback',
+      message: 'VITE_ANTHROPIC_API_KEY is not set -- cannot call the LLM fallback',
     })
   }
 
@@ -209,7 +274,7 @@ export async function llmFallback(transcript: string): Promise<ShapeCommand | nu
     })
   }
 
-  // Validate against the shared Zod schema — never return unvalidated data.
+  // Validate against the shared Zod schema -- never return unvalidated data.
   const result = ShapeCommandSchema.safeParse(raw)
   return result.success ? result.data : null
 }

@@ -2,7 +2,7 @@
  * src/types/index.ts
  *
  * Single import point for every shared type and Zod schema in the voice-to-canvas
- * pipeline.  Import from here — never from individual sub-files — so that all
+ * pipeline.  Import from here -- never from individual sub-files -- so that all
  * downstream modules stay in sync with the single source of truth.
  *
  * @example
@@ -24,9 +24,16 @@ export {
 } from './shapes'
 
 // ---------------------------------------------------------------------------
-// Parser output: ShapeCommand
+// Parser output: ShapeCommand (+ ShapeReference discriminator)
 // ---------------------------------------------------------------------------
-export { IntentSchema, ShapeCommandSchema, type Intent, type ShapeCommand } from './commands'
+export {
+  IntentSchema,
+  ShapeReferenceSchema,
+  ShapeCommandSchema,
+  type Intent,
+  type ShapeReference,
+  type ShapeCommand,
+} from './commands'
 
 // ---------------------------------------------------------------------------
 // Executor input: TldrawAction (discriminated union)

@@ -13,5 +13,5 @@ import { VoiceCanvas } from './voice/VoiceCanvas'
  * Keyboard shortcut: Space toggles listening when not in a text field.
  */
 export default function App() {
-  return <VoiceCanvas micMode="toggle" />
+  return <VoiceCanvas />
 }

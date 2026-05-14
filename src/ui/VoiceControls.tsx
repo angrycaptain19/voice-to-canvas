@@ -10,7 +10,10 @@
  *   Hold >= 300 ms -> push-to-talk (release to stop)
  *   Tap  < 300 ms  -> toggle (click again to stop)
  *
- * Keyboard shortcut: Space (when not inside a text field) toggles listening.
+ * Keyboard shortcut: Space (when not inside a text field) activates /
+ * deactivates the mic.  While active the mic stays open continuously;
+ * shapes appear automatically as sentences are committed — no manual stop
+ * needed.  A second Space press fully deactivates the mic.
  *
  * ## Composition
  *
@@ -85,9 +88,11 @@ function badgeLabel(status: VoiceStatus, showDone: boolean, error: VoiceError | 
   if (showDone) return 'Done ✓'
   switch (status) {
     case 'listening':
-      return 'Listening…'
+      return '● Listening'
     case 'processing':
       return 'Processing…'
+    case 'idle':
+      return 'Space to talk'
     default:
       return ''
   }
@@ -96,11 +101,13 @@ function badgeLabel(status: VoiceStatus, showDone: boolean, error: VoiceError | 
 function StatusBadge({ status, showDone, error }: StatusBadgeProps): React.ReactElement | null {
   const label = badgeLabel(status, showDone, error)
   if (!label) return null
+  // Always render (including idle hint) so we keep a consistent layout anchor.
 
   const isListening = status === 'listening' && !showDone && error === null
   const isProcessing = status === 'processing' && !showDone && error === null
   const isError = error !== null || status === 'error'
   const isDone = showDone && error === null
+  const isIdle = status === 'idle' && !showDone && error === null
 
   const badgeClass = [
     styles.statusBadge,
@@ -108,6 +115,7 @@ function StatusBadge({ status, showDone, error }: StatusBadgeProps): React.React
     isProcessing ? styles.statusProcessing : '',
     isDone ? styles.statusDone : '',
     isError ? styles.statusError : '',
+    isIdle ? styles.statusIdle : '',
   ]
     .filter(Boolean)
     .join(' ')
@@ -118,7 +126,8 @@ function StatusBadge({ status, showDone, error }: StatusBadgeProps): React.React
 
   return (
     <span className={badgeClass}>
-      <span className={dotClass} aria-hidden="true" />
+      {/* Hide the dot in idle state — the hint text is the whole affordance */}
+      {!isIdle && <span className={dotClass} aria-hidden="true" />}
       {label}
     </span>
   )
@@ -367,15 +376,19 @@ export function VoiceControls({
   }, [status])
 
   // ---- 'Done' badge -------------------------------------------------------
+  //
+  // In streaming mode status stays 'listening' as sentences are committed, so
+  // we drive the Done badge off commandFeedback (which fires after each
+  // executed sentence) rather than waiting for status === 'idle'.
 
   const [showDone, setShowDone] = useState(false)
 
   useEffect(() => {
-    if (!finalText || status !== 'idle') return
+    if (!commandFeedback) return
     setShowDone(true)
     const id = setTimeout(() => setShowDone(false), DONE_BADGE_MS)
     return () => clearTimeout(id)
-  }, [finalText, status])
+  }, [commandFeedback])
 
   // ---- Command feedback toast ---------------------------------------------
 
@@ -420,18 +433,18 @@ export function VoiceControls({
   if (status === 'error') {
     ariaLabel = 'Microphone error -- click to retry'
   } else if (isListening) {
-    ariaLabel = 'Recording -- click or release to stop'
+    ariaLabel = 'Listening -- click or Space to deactivate mic'
   } else if (status === 'processing') {
     ariaLabel = 'Processing voice command'
   } else {
-    ariaLabel = 'Start recording -- hold for push-to-talk, tap to toggle'
+    ariaLabel = 'Activate mic -- hold for push-to-talk, tap to toggle, or press Space'
   }
 
   let liveAnnouncement = ''
   if (status === 'error' && error) {
     liveAnnouncement = 'Error: ' + error.message
   } else if (status === 'listening') {
-    liveAnnouncement = 'Listening'
+    liveAnnouncement = 'Listening — speak a command'
   } else if (status === 'processing') {
     liveAnnouncement = 'Processing'
   } else if (showDone) {

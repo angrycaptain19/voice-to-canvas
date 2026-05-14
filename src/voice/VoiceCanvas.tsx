@@ -1,31 +1,55 @@
 /**
  * src/voice/VoiceCanvas.tsx
  *
- * Top-level composition that wires together:
- *   - tldraw canvas (full viewport)
- *   - useVoiceTranscript hook
- *   - VoiceControls (mic button, transcript overlay, status badge, feedback toast)
- *   - VoiceErrorToast (error feedback)
- *   - parseVoiceCommand (parser) -- invoked when a final transcript arrives
+ * Top-level composition that wires together the full voice → shape pipeline:
+ *
+ *   useVoiceTranscript()
+ *       │ onFinalTranscript
+ *       ▼
+ *   parseVoiceCommand()   ← local grammar fast path (<5 ms), LLM fallback
+ *       │ ShapeCommand
+ *       ▼
+ *   commandToAction()     ← intent → type rename
+ *       │ TldrawAction
+ *       ▼
+ *   executeTldrawAction(editor, action)  ← mutates the live tldraw canvas
+ *       │
+ *       ▼
+ *   commandFeedback toast + error toast (on failure)
+ *
+ * Error containment:
+ *   - The VoiceControls subtree is wrapped in a VoiceErrorBoundary so a
+ *     render crash in the UI layer never takes down the canvas.
+ *   - Parse / execute errors are caught and surfaced via the toast system.
+ *   - If parseVoiceCommand throws PARSE_FAILURE we show
+ *     "I didn't understand that" rather than crashing.
+ *
+ * Latency target:
+ *   Grammar fast path: transcript → shape in ~10–30 ms (no network).
+ *   LLM fallback path: transcript → shape in ~200–600 ms.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
+import type { Editor } from 'tldraw'
 import { Tldraw } from 'tldraw'
 import 'tldraw/tldraw.css'
 
 import { useVoiceTranscript } from './useVoiceTranscript'
 import { VoiceErrorToast } from './VoiceErrorToast'
+import { VoiceErrorBoundary } from './VoiceErrorBoundary'
 import { useVoiceError } from './useVoiceError'
 import { createVoiceError, isVoiceError } from './errors'
 import type { VoiceErrorCode } from './errors'
 import { VoiceControls } from '../ui/VoiceControls'
 import { parseVoiceCommand } from '../commands/parseVoiceCommand'
+import { executeTldrawAction } from '../commands/executeTldrawAction'
+import { commandToAction } from '../commands/commandToAction'
 import type { ShapeCommand } from '../types'
 import type { VoiceError as TypesVoiceError } from '../types'
 
 // ---------------------------------------------------------------------------
-// Error code mapping
+// Error code mapping (types/voice.ts codes → voice/errors.ts codes)
 // ---------------------------------------------------------------------------
 
 function mapTypesErrorCodeToToastCode(code: TypesVoiceError['code']): VoiceErrorCode {
@@ -116,6 +140,20 @@ const rootStyle: CSSProperties = {
 // ---------------------------------------------------------------------------
 
 export function VoiceCanvas(): React.ReactElement {
+  // ── tldraw editor ref ──────────────────────────────────────────────────────
+  // The editor is handed to us via <Tldraw onMount={...}> and stored in a ref
+  // so it is always current in async callbacks without triggering re-renders.
+  const editorRef = useRef<Editor | null>(null)
+
+  const handleMount = useCallback((editor: Editor) => {
+    editorRef.current = editor
+    // Return a cleanup function — tldraw calls it when the canvas unmounts.
+    return () => {
+      editorRef.current = null
+    }
+  }, [])
+
+  // ── Voice capture ──────────────────────────────────────────────────────────
   const [transcriptState, { start, stop }] = useVoiceTranscript()
   const { error: toastError, setError: setToastError, clearError } = useVoiceError()
 
@@ -131,21 +169,56 @@ export function VoiceCanvas(): React.ReactElement {
     }
   }, [error, setToastError, clearError])
 
-  // Parse final transcript and generate command feedback
+  // ── Pipeline: transcript → parse → execute ─────────────────────────────────
   const lastParsedTranscriptRef = useRef<string>('')
   const [commandFeedback, setCommandFeedback] = useState<string | null>(null)
 
-  const runParser = useCallback(
+  const runPipeline = useCallback(
     async (transcript: string) => {
+      // Debounce: skip if we already processed this exact transcript
       if (!transcript || transcript === lastParsedTranscriptRef.current) return
       lastParsedTranscriptRef.current = transcript
 
       try {
+        // Step 1: parse transcript → ShapeCommand
         const cmd = await parseVoiceCommand(transcript)
+
+        // Step 2: convert ShapeCommand → TldrawAction
+        const action = commandToAction(cmd)
+
+        // Step 3: execute on live editor (guard against editor not yet ready)
+        const editor = editorRef.current
+        if (editor) {
+          try {
+            executeTldrawAction(editor, action)
+          } catch (execErr) {
+            // Execution errors (e.g. invalid editor state) are non-fatal —
+            // log and show a generic toast rather than crashing.
+            console.error('[VoiceCanvas] executeTldrawAction threw:', execErr)
+            setToastError(createVoiceError('UNKNOWN'))
+            setCommandFeedback(null)
+            return
+          }
+        }
+
+        // Step 4: surface command feedback toast
         setCommandFeedback(commandToFeedbackLabel(cmd))
       } catch (err) {
+        // parseVoiceCommand throws VoiceError on PARSE_FAILURE or
+        // LLM_FALLBACK_ERROR.  Surface the right toast copy.
         if (isVoiceError(err)) {
-          setToastError(err)
+          if (err.code === 'PARSE_FAILURE') {
+            // Show a friendly "I didn't understand that" message instead of a
+            // raw error so the pipeline never silently crashes.
+            setToastError(
+              createVoiceError('PARSE_FAILURE', {
+                rawTranscript: transcript,
+                message: `I didn\u2019t understand: \u201c${transcript}\u201d \u2014 try again`,
+              }),
+            )
+          } else {
+            setToastError(err)
+          }
         } else {
           setToastError(createVoiceError('UNKNOWN'))
         }
@@ -155,13 +228,14 @@ export function VoiceCanvas(): React.ReactElement {
     [setToastError],
   )
 
+  // Trigger the pipeline whenever a final transcript arrives and we are idle
   useEffect(() => {
     if (status === 'idle' && finalTranscript) {
-      void runParser(finalTranscript)
+      void runPipeline(finalTranscript)
     }
-  }, [status, finalTranscript, runParser])
+  }, [status, finalTranscript, runPipeline])
 
-  // Clear command feedback when user starts a new recording
+  // Clear command feedback & dedup guard when user starts a new recording
   useEffect(() => {
     if (status === 'listening') {
       lastParsedTranscriptRef.current = ''
@@ -169,20 +243,36 @@ export function VoiceCanvas(): React.ReactElement {
     }
   }, [status])
 
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
     <div style={rootStyle}>
-      <Tldraw />
+      {/*
+       * The tldraw canvas fills the full viewport.  onMount hands us the
+       * Editor instance required by executeTldrawAction.
+       */}
+      <Tldraw onMount={handleMount} />
 
-      <VoiceControls
-        status={status}
-        interim={interimTranscript}
-        final={finalTranscript}
-        error={error}
-        onStart={start}
-        onStop={stop}
-        commandFeedback={commandFeedback}
-      />
+      {/*
+       * VoiceErrorBoundary isolates the voice UI subtree so a render crash
+       * in VoiceControls never brings down the whole canvas.
+       */}
+      <VoiceErrorBoundary>
+        <VoiceControls
+          status={status}
+          interim={interimTranscript}
+          final={finalTranscript}
+          error={error}
+          onStart={start}
+          onStop={stop}
+          commandFeedback={commandFeedback}
+        />
+      </VoiceErrorBoundary>
 
+      {/*
+       * VoiceErrorToast is rendered outside the boundary so it can display
+       * errors even when the VoiceControls subtree has crashed.
+       */}
       <VoiceErrorToast
         error={toastError}
         onDismiss={clearError}

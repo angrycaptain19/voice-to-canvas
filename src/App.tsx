@@ -1,16 +1,17 @@
-import { Tldraw } from 'tldraw'
-import 'tldraw/tldraw.css'
+import { VoiceCanvas } from './voice/VoiceCanvas'
 
 /**
  * Root application component.
  *
- * Renders a full-viewport tldraw canvas. Future modules (voice input, command
- * parsing, animation) will be layered on top of this baseline.
+ * Renders a full-viewport tldraw canvas with integrated voice capture controls
+ * (mic button, live transcript overlay, error toasts).
+ *
+ * Voice modes:
+ *   micMode="toggle" — click once to start, click again to stop (default)
+ *   micMode="hold"   — hold the button to record, release to commit
+ *
+ * Keyboard shortcut: Space toggles listening when not in a text field.
  */
 export default function App() {
-  return (
-    <div style={{ position: 'fixed', inset: 0 }}>
-      <Tldraw />
-    </div>
-  )
+  return <VoiceCanvas micMode="toggle" />
 }

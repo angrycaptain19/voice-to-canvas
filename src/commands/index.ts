@@ -22,3 +22,5 @@ export { parseVoiceCommand, matchGrammar, llmFallback } from './parseVoiceComman
 export type { ShapeCommand } from '../types'
 export { executeTldrawAction } from './executeTldrawAction'
 export { commandToAction } from './commandToAction'
+export { resolveShapeReference } from './resolveShapeReference'
+export type { ShapeRef, ResolveResult } from './resolveShapeReference'

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { ShapeColorSchema, ShapePositionSchema, ShapeSizeSchema, ShapeTypeSchema } from './shapes'
+import { ShapeReferenceSchema } from './commands'
 
 // ---------------------------------------------------------------------------
 // ActionType — mirrors Intent but represents tldraw executor operations
@@ -42,6 +43,7 @@ const CreateShapeActionSchema = z.object({
 const MoveShapeActionSchema = z.object({
   type: z.literal('MOVE_SHAPE'),
   targetId: z.string().optional(),
+  shapeReference: ShapeReferenceSchema.optional(),
   position: ShapePositionSchema.optional(),
   dx: z.number().optional(),
   dy: z.number().optional(),
@@ -50,6 +52,7 @@ const MoveShapeActionSchema = z.object({
 const ResizeShapeActionSchema = z.object({
   type: z.literal('RESIZE_SHAPE'),
   targetId: z.string().optional(),
+  shapeReference: ShapeReferenceSchema.optional(),
   size: ShapeSizeSchema.optional(),
   factor: z.number().optional(),
 })
@@ -57,12 +60,14 @@ const ResizeShapeActionSchema = z.object({
 const RotateShapeActionSchema = z.object({
   type: z.literal('ROTATE_SHAPE'),
   targetId: z.string().optional(),
+  shapeReference: ShapeReferenceSchema.optional(),
   angle: z.number().optional(),
 })
 
 const DeleteShapeActionSchema = z.object({
   type: z.literal('DELETE_SHAPE'),
   targetId: z.string().optional(),
+  shapeReference: ShapeReferenceSchema.optional(),
 })
 
 const DeleteAllActionSchema = z.object({
@@ -72,12 +77,14 @@ const DeleteAllActionSchema = z.object({
 const StyleShapeActionSchema = z.object({
   type: z.literal('STYLE_SHAPE'),
   targetId: z.string().optional(),
+  shapeReference: ShapeReferenceSchema.optional(),
   color: ShapeColorSchema.optional(),
 })
 
 const SelectShapeActionSchema = z.object({
   type: z.literal('SELECT_SHAPE'),
   targetId: z.string().optional(),
+  shapeReference: ShapeReferenceSchema.optional(),
   shapeType: ShapeTypeSchema.optional(),
   color: ShapeColorSchema.optional(),
 })

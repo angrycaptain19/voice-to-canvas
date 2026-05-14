@@ -4,9 +4,9 @@
  * Dedicated tests for the LLM fallback path in llmFallback().
  *
  * Strategy:
- *   - vi.mock('openai') provides a constructor mock whose `.chat.completions.create`
- *     is controlled via `mockCreate`.
- *   - vi.stubEnv sets VITE_OPENAI_API_KEY so getClient() succeeds.
+ *   - vi.mock('@anthropic-ai/sdk') provides a constructor mock whose
+ *     `.messages.create` is controlled via `mockCreate`.
+ *   - vi.stubEnv sets VITE_ANTHROPIC_API_KEY so getClient() succeeds.
  *   - _resetClientForTest() clears the module-level _client cache between tests
  *     WITHOUT needing vi.resetModules() (which breaks the mock registry).
  *
@@ -17,17 +17,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { llmFallback, _resetClientForTest } from '../llmFallback'
 
 // ---------------------------------------------------------------------------
-// Mock OpenAI — must be a proper constructor (not an arrow function)
+// Mock Anthropic — must be a proper constructor (not an arrow function)
 // ---------------------------------------------------------------------------
 
 const mockCreate = vi.fn()
 
-vi.mock('openai', () => {
-  // Use a real function (not arrow) so `new MockOpenAI()` works
-  function MockOpenAI(_opts: unknown) {
-    return { chat: { completions: { create: mockCreate } } }
+vi.mock('@anthropic-ai/sdk', () => {
+  // Use a real function (not arrow) so `new MockAnthropic()` works
+  function MockAnthropic(_opts: unknown) {
+    return { messages: { create: mockCreate } }
   }
-  return { default: MockOpenAI }
+  return { default: MockAnthropic }
 })
 
 // ---------------------------------------------------------------------------
@@ -38,7 +38,7 @@ describe('llmFallback()', () => {
   beforeEach(() => {
     mockCreate.mockReset()
     // Set the API key so getClient() succeeds
-    vi.stubEnv('VITE_OPENAI_API_KEY', 'sk-test-mock-key')
+    vi.stubEnv('VITE_ANTHROPIC_API_KEY', 'sk-ant-test-mock-key')
     // Clear the cached _client so getClient() re-runs with the new env
     _resetClientForTest()
   })
@@ -50,18 +50,15 @@ describe('llmFallback()', () => {
 
   it('successful LLM response → returns Zod-validated ShapeCommand', async () => {
     mockCreate.mockResolvedValueOnce({
-      choices: [
+      content: [
         {
-          message: {
-            function_call: {
-              name: 'parse_voice_command',
-              arguments: JSON.stringify({
-                intent: 'CREATE_SHAPE',
-                shapeType: 'circle',
-                color: 'blue',
-                rawTranscript: 'please draw a wobbly blue circle',
-              }),
-            },
+          type: 'tool_use',
+          name: 'parse_voice_command',
+          input: {
+            intent: 'CREATE_SHAPE',
+            shapeType: 'circle',
+            color: 'blue',
+            rawTranscript: 'please draw a wobbly blue circle',
           },
         },
       ],
@@ -78,16 +75,13 @@ describe('llmFallback()', () => {
 
   it('LLM returns DELETE_ALL intent → returns ShapeCommand with correct intent', async () => {
     mockCreate.mockResolvedValueOnce({
-      choices: [
+      content: [
         {
-          message: {
-            function_call: {
-              name: 'parse_voice_command',
-              arguments: JSON.stringify({
-                intent: 'DELETE_ALL',
-                rawTranscript: 'wipe the canvas',
-              }),
-            },
+          type: 'tool_use',
+          name: 'parse_voice_command',
+          input: {
+            intent: 'DELETE_ALL',
+            rawTranscript: 'wipe the canvas',
           },
         },
       ],
@@ -107,16 +101,13 @@ describe('llmFallback()', () => {
 
   it('LLM response has invalid intent (Zod validation fails) → returns null', async () => {
     mockCreate.mockResolvedValueOnce({
-      choices: [
+      content: [
         {
-          message: {
-            function_call: {
-              name: 'parse_voice_command',
-              arguments: JSON.stringify({
-                intent: 'NOT_A_REAL_INTENT',
-                rawTranscript: 'something weird',
-              }),
-            },
+          type: 'tool_use',
+          name: 'parse_voice_command',
+          input: {
+            intent: 'NOT_A_REAL_INTENT',
+            rawTranscript: 'something weird',
           },
         },
       ],
@@ -128,17 +119,14 @@ describe('llmFallback()', () => {
 
   it('LLM response missing required rawTranscript → returns null', async () => {
     mockCreate.mockResolvedValueOnce({
-      choices: [
+      content: [
         {
-          message: {
-            function_call: {
-              name: 'parse_voice_command',
-              arguments: JSON.stringify({
-                intent: 'CREATE_SHAPE',
-                shapeType: 'circle',
-                // rawTranscript intentionally omitted — Zod will reject
-              }),
-            },
+          type: 'tool_use',
+          name: 'parse_voice_command',
+          input: {
+            intent: 'CREATE_SHAPE',
+            shapeType: 'circle',
+            // rawTranscript intentionally omitted — Zod will reject
           },
         },
       ],
@@ -148,36 +136,17 @@ describe('llmFallback()', () => {
     expect(result).toBeNull()
   })
 
-  it('LLM returns null function_call → returns null', async () => {
+  it('LLM returns no tool_use block → returns null', async () => {
     mockCreate.mockResolvedValueOnce({
-      choices: [{ message: { function_call: null } }],
+      content: [{ type: 'text', text: 'I cannot help with that.' }],
     })
 
     const result = await llmFallback('hmm what')
     expect(result).toBeNull()
   })
 
-  it('LLM returns malformed JSON arguments → throws LLM_FALLBACK_ERROR', async () => {
-    mockCreate.mockResolvedValueOnce({
-      choices: [
-        {
-          message: {
-            function_call: {
-              name: 'parse_voice_command',
-              arguments: '{ not valid json !!!',
-            },
-          },
-        },
-      ],
-    })
-
-    await expect(llmFallback('some transcript')).rejects.toMatchObject({
-      code: 'LLM_FALLBACK_ERROR',
-    })
-  })
-
-  it('LLM returns empty choices array → returns null', async () => {
-    mockCreate.mockResolvedValueOnce({ choices: [] })
+  it('LLM returns empty content array → returns null', async () => {
+    mockCreate.mockResolvedValueOnce({ content: [] })
 
     const result = await llmFallback('any command')
     expect(result).toBeNull()
@@ -185,17 +154,14 @@ describe('llmFallback()', () => {
 
   it('LLM returns UNDO intent with steps → returns validated UNDO command', async () => {
     mockCreate.mockResolvedValueOnce({
-      choices: [
+      content: [
         {
-          message: {
-            function_call: {
-              name: 'parse_voice_command',
-              arguments: JSON.stringify({
-                intent: 'UNDO',
-                steps: 3,
-                rawTranscript: 'go back three times',
-              }),
-            },
+          type: 'tool_use',
+          name: 'parse_voice_command',
+          input: {
+            intent: 'UNDO',
+            steps: 3,
+            rawTranscript: 'go back three times',
           },
         },
       ],
@@ -207,17 +173,14 @@ describe('llmFallback()', () => {
 
   it('LLM returns STYLE_SHAPE with violet color → color field is violet', async () => {
     mockCreate.mockResolvedValueOnce({
-      choices: [
+      content: [
         {
-          message: {
-            function_call: {
-              name: 'parse_voice_command',
-              arguments: JSON.stringify({
-                intent: 'STYLE_SHAPE',
-                color: 'violet',
-                rawTranscript: 'make it purple',
-              }),
-            },
+          type: 'tool_use',
+          name: 'parse_voice_command',
+          input: {
+            intent: 'STYLE_SHAPE',
+            color: 'violet',
+            rawTranscript: 'make it purple',
           },
         },
       ],
@@ -227,9 +190,9 @@ describe('llmFallback()', () => {
     expect(result).toMatchObject({ intent: 'STYLE_SHAPE', color: 'violet' })
   })
 
-  it('VITE_OPENAI_API_KEY not set → throws LLM_FALLBACK_ERROR', async () => {
+  it('VITE_ANTHROPIC_API_KEY not set → throws LLM_FALLBACK_ERROR', async () => {
     // Override the env to be empty and reset the cached client
-    vi.stubEnv('VITE_OPENAI_API_KEY', '')
+    vi.stubEnv('VITE_ANTHROPIC_API_KEY', '')
     _resetClientForTest()
 
     await expect(llmFallback('any command')).rejects.toMatchObject({

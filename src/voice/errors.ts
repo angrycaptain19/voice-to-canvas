@@ -63,27 +63,20 @@ export interface VoiceError {
  * every other code maps to a plain string.
  */
 export const VOICE_ERROR_MESSAGES: {
-  [K in VoiceErrorCode]: K extends 'PARSE_FAILURE'
-    ? (rawTranscript: string) => string
-    : string
+  [K in VoiceErrorCode]: K extends 'PARSE_FAILURE' ? (rawTranscript: string) => string : string
 } = {
-  MIC_PERMISSION_DENIED:
-    'Microphone access blocked \u2014 click here to open browser settings',
+  MIC_PERMISSION_DENIED: 'Microphone access blocked \u2014 click here to open browser settings',
 
-  MIC_NOT_FOUND:
-    'No microphone found \u2014 plug in a mic and try again',
+  MIC_NOT_FOUND: 'No microphone found \u2014 plug in a mic and try again',
 
-  SPEECH_API_UNAVAILABLE:
-    "Your browser doesn\u2019t support voice input \u2014 use Chrome or Edge",
+  SPEECH_API_UNAVAILABLE: 'Your browser doesn\u2019t support voice input \u2014 use Chrome or Edge',
 
-  NO_SPEECH_DETECTED:
-    'Nothing heard \u2014 hold the mic button and speak',
+  NO_SPEECH_DETECTED: 'Nothing heard \u2014 hold the mic button and speak',
 
   PARSE_FAILURE: (rawTranscript: string) =>
     `I didn\u2019t understand: \u201c${rawTranscript}\u201d \u2014 try again`,
 
-  LLM_FALLBACK_ERROR:
-    'Something went wrong processing your command \u2014 please try again',
+  LLM_FALLBACK_ERROR: 'Something went wrong processing your command \u2014 please try again',
 
   DEEPGRAM_CONNECTION_ERROR:
     'Could not connect to speech recognition \u2014 check your network and retry',
@@ -142,8 +135,7 @@ export function createVoiceError(
 export function toVoiceError(unknown: unknown): VoiceError {
   if (isVoiceError(unknown)) return unknown
 
-  const message =
-    unknown instanceof Error ? unknown.message : 'An unknown error occurred'
+  const message = unknown instanceof Error ? unknown.message : 'An unknown error occurred'
 
   return { code: 'UNKNOWN', message }
 }

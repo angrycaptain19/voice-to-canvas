@@ -136,22 +136,12 @@ export class VoiceErrorBoundary extends Component<
 
     // ── Default banner ────────────────────────────────────────────────────────
     return (
-      <div
-        role="alert"
-        aria-live="assertive"
-        style={bannerStyles.wrapper}
-      >
+      <div role="alert" aria-live="assertive" style={bannerStyles.wrapper}>
         <span style={bannerStyles.icon} aria-hidden="true">
           ⚠️
         </span>
-        <span style={bannerStyles.message}>
-          Voice input encountered an unexpected error.
-        </span>
-        <button
-          style={bannerStyles.retryButton}
-          onClick={this.handleRetry}
-          type="button"
-        >
+        <span style={bannerStyles.message}>Voice input encountered an unexpected error.</span>
+        <button style={bannerStyles.retryButton} onClick={this.handleRetry} type="button">
           Try again
         </button>
       </div>

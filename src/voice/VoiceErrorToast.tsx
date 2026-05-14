@@ -27,12 +27,7 @@
  *   )
  */
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { CSSProperties } from 'react'
 import type { VoiceError } from './errors'
@@ -230,12 +225,7 @@ export function VoiceErrorToast({
   const icon = iconForCode(error.code)
 
   const toast = (
-    <div
-      role="alert"
-      aria-live="polite"
-      aria-atomic="true"
-      style={styles.container}
-    >
+    <div role="alert" aria-live="polite" aria-atomic="true" style={styles.container}>
       {/* Auto-dismiss progress bar for timed toasts */}
       {!isPersistent && (
         <span
@@ -255,11 +245,7 @@ export function VoiceErrorToast({
         {error.code === 'MIC_PERMISSION_DENIED' ? (
           <>
             <span style={styles.message}>Microphone access blocked &mdash;</span>
-            <button
-              type="button"
-              style={styles.actionLink}
-              onClick={onSettingsClick}
-            >
+            <button type="button" style={styles.actionLink} onClick={onSettingsClick}>
               click here to open browser settings
             </button>
           </>

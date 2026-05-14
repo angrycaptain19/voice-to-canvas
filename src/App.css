@@ -1,0 +1,162 @@
+/* ── Reset ──────────────────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ── VoiceCanvas ────────────────────────────────────────────────────────── */
+
+.voice-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.voice-canvas__tldraw {
+  position: absolute;
+  inset: 0;
+}
+
+.voice-canvas__controls {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 300;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* ── MicButton ──────────────────────────────────────────────────────────── */
+
+.mic-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 9999px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.1s ease;
+  outline-offset: 3px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.mic-button:active {
+  transform: scale(0.97);
+}
+
+.mic-button:focus-visible {
+  outline: 3px solid #60a5fa;
+}
+
+.mic-button--idle {
+  background: #ffffff;
+  color: #1e293b;
+}
+
+.mic-button--idle:hover {
+  background: #f1f5f9;
+}
+
+.mic-button--listening {
+  background: #ef4444;
+  color: #ffffff;
+  animation: mic-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes mic-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+  }
+}
+
+.mic-button--processing {
+  background: #f97316;
+  color: #ffffff;
+}
+
+.mic-button--error {
+  background: #fef2f2;
+  color: #ef4444;
+  border: 2px solid #fca5a5;
+}
+
+.mic-icon {
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.mic-icon--active {
+  transform: scale(1.15);
+}
+
+/* ── VoiceOverlay ───────────────────────────────────────────────────────── */
+
+.voice-overlay {
+  position: absolute;
+  bottom: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 300;
+  max-width: 480px;
+  width: calc(100% - 48px);
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(8px);
+  border-radius: 12px;
+  padding: 12px 18px;
+  color: #f1f5f9;
+  font-family: system-ui, sans-serif;
+  pointer-events: none;
+}
+
+.voice-overlay p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.voice-overlay__interim {
+  color: #94a3b8;
+  font-style: italic;
+  font-size: 15px;
+}
+
+.voice-overlay__final {
+  color: #f1f5f9;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.voice-overlay__hint {
+  color: #64748b;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+
+.voice-overlay__error {
+  color: #fca5a5;
+  font-size: 14px;
+}

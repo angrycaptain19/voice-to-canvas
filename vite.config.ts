@@ -6,6 +6,11 @@ import type { ProxyOptions } from 'vite'
 export default defineConfig({
   plugins: [react()],
 
+  optimizeDeps: {
+    // tldraw ships ESM-only packages that need pre-bundling
+    include: ['tldraw'],
+  },
+
   server: {
     proxy: {
       /**

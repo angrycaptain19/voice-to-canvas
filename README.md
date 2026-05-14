@@ -81,12 +81,12 @@ The Vite dev proxy is **development-only**. For production you must replace it
 with a server-side route that injects the `Authorization` header. Recommended
 options:
 
-| Platform | Approach |
-|---|---|
-| Vercel | [Edge Function](https://vercel.com/docs/functions/edge-functions) at `/api/deepgram.ts` |
+| Platform         | Approach                                                                                                     |
+| ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| Vercel           | [Edge Function](https://vercel.com/docs/functions/edge-functions) at `/api/deepgram.ts`                      |
 | Cloudflare Pages | [Pages Function](https://developers.cloudflare.com/pages/functions/) at `functions/api/deepgram/[[path]].ts` |
-| AWS | Lambda function behind API Gateway |
-| Self-hosted | Express/Fastify route that proxies to Deepgram |
+| AWS              | Lambda function behind API Gateway                                                                           |
+| Self-hosted      | Express/Fastify route that proxies to Deepgram                                                               |
 
 Set the corresponding `VITE_DEEPGRAM_PROXY_URL` build variable to point the
 browser at your production route (e.g. `VITE_DEEPGRAM_PROXY_URL=/api/deepgram`).
@@ -95,14 +95,14 @@ browser at your production route (e.g. `VITE_DEEPGRAM_PROXY_URL=/api/deepgram`).
 
 ## Available scripts
 
-| Command | Description |
-|---|---|
-| `npm run dev` | Start Vite dev server with HMR |
-| `npm run build` | Type-check + production bundle |
-| `npm run preview` | Serve the production build locally |
-| `npm run typecheck` | Run `tsc --noEmit` |
-| `npm run lint` | ESLint |
-| `npm run format` | Prettier write |
+| Command             | Description                        |
+| ------------------- | ---------------------------------- |
+| `npm run dev`       | Start Vite dev server with HMR     |
+| `npm run build`     | Type-check + production bundle     |
+| `npm run preview`   | Serve the production build locally |
+| `npm run typecheck` | Run `tsc --noEmit`                 |
+| `npm run lint`      | ESLint                             |
+| `npm run format`    | Prettier write                     |
 
 ---
 

@@ -7,12 +7,13 @@
  *       │ onFinalTranscript
  *       ▼
  *   parseVoiceCommand()   ← local grammar fast path (<5 ms), LLM fallback
- *       │ ShapeCommand
+ *       │ ShapeCommandBatch (always an array, even for single commands)
  *       ▼
- *   commandToAction()     ← intent → type rename
- *       │ TldrawAction
+ *   commandToAction()     ← intent → type rename (per command)
+ *       │ TldrawAction[]
  *       ▼
- *   executeTldrawAction(editor, action)  ← mutates the live tldraw canvas
+ *   editor.run(() => { executeTldrawAction(editor, action) })
+ *       ← all actions in one atomic undo step
  *       │
  *       ▼
  *   commandFeedback toast + error toast (on failure)
@@ -180,17 +181,18 @@ export function VoiceCanvas(): React.ReactElement {
       lastParsedTranscriptRef.current = transcript
 
       try {
-        // Step 1: parse transcript → ShapeCommand
-        const cmd = await parseVoiceCommand(transcript)
+        // Step 1: parse transcript → ShapeCommandBatch (always an array)
+        const cmds = await parseVoiceCommand(transcript)
 
-        // Step 2: convert ShapeCommand → TldrawAction
-        const action = commandToAction(cmd)
-
-        // Step 3: execute on live editor (guard against editor not yet ready)
+        // Step 2: execute all commands on live editor in one atomic undo step
         const editor = editorRef.current
         if (editor) {
           try {
-            executeTldrawAction(editor, action)
+            editor.run(() => {
+              for (const cmd of cmds) {
+                executeTldrawAction(editor, commandToAction(cmd))
+              }
+            })
           } catch (execErr) {
             // Execution errors (e.g. invalid editor state) are non-fatal —
             // log and show a generic toast rather than crashing.
@@ -201,8 +203,13 @@ export function VoiceCanvas(): React.ReactElement {
           }
         }
 
-        // Step 4: surface command feedback toast
-        setCommandFeedback(commandToFeedbackLabel(cmd))
+        // Step 3: surface command feedback toast
+        // Show count if batch has more than one shape, otherwise describe the single command
+        setCommandFeedback(
+          cmds.length > 1
+            ? `Created ${cmds.length} shapes`
+            : commandToFeedbackLabel(cmds[0]),
+        )
       } catch (err) {
         // parseVoiceCommand throws VoiceError on PARSE_FAILURE or
         // LLM_FALLBACK_ERROR.  Surface the right toast copy.

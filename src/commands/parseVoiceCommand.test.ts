@@ -25,8 +25,14 @@ import { parseVoiceCommand } from './parseVoiceCommand'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/** Call matchGrammar with transcript as both arguments. */
+/** Call matchGrammar and return the first command (for single-command tests). */
 function grammar(transcript: string) {
+  const batch = matchGrammar(transcript.trim(), transcript)
+  return batch !== null ? batch[0] : null
+}
+
+/** Call matchGrammar and return the full batch array (for multi-shape tests). */
+function grammarBatch(transcript: string) {
   return matchGrammar(transcript.trim(), transcript)
 }
 
@@ -537,13 +543,16 @@ describe('parseVoiceCommand -- grammar fast-path (no network)', () => {
   })
 
   it('resolves to UNDO via grammar without network call', async () => {
-    const cmd = await parseVoiceCommand('undo')
-    expect(cmd).toMatchObject({ intent: 'UNDO', steps: 1 })
+    const cmds = await parseVoiceCommand('undo')
+    expect(Array.isArray(cmds)).toBe(true)
+    expect(cmds).toHaveLength(1)
+    expect(cmds[0]).toMatchObject({ intent: 'UNDO', steps: 1 })
   })
 
   it('resolves complex CREATE_SHAPE via grammar without network call', async () => {
-    const cmd = await parseVoiceCommand('draw a red circle in the top-left')
-    expect(cmd).toMatchObject({
+    const cmds = await parseVoiceCommand('draw a red circle in the top-left')
+    expect(Array.isArray(cmds)).toBe(true)
+    expect(cmds[0]).toMatchObject({
       intent: 'CREATE_SHAPE',
       shapeType: 'circle',
       color: 'red',
@@ -553,23 +562,23 @@ describe('parseVoiceCommand -- grammar fast-path (no network)', () => {
 
   it('rawTranscript is the original string (not trimmed)', async () => {
     const raw = '  draw a blue star  '
-    const cmd = await parseVoiceCommand(raw)
-    expect(cmd.rawTranscript).toBe(raw)
+    const cmds = await parseVoiceCommand(raw)
+    expect(cmds[0].rawTranscript).toBe(raw)
   })
 
   it('resolves SELECT_ALL via grammar', async () => {
-    const cmd = await parseVoiceCommand('select all')
-    expect(cmd).toMatchObject({ intent: 'SELECT_ALL' })
+    const cmds = await parseVoiceCommand('select all')
+    expect(cmds[0]).toMatchObject({ intent: 'SELECT_ALL' })
   })
 
   it('resolves DELETE_ALL via grammar', async () => {
-    const cmd = await parseVoiceCommand('delete everything')
-    expect(cmd).toMatchObject({ intent: 'DELETE_ALL' })
+    const cmds = await parseVoiceCommand('delete everything')
+    expect(cmds[0]).toMatchObject({ intent: 'DELETE_ALL' })
   })
 
   it('resolves STYLE_SHAPE color via grammar', async () => {
-    const cmd = await parseVoiceCommand('make it orange')
-    expect(cmd).toMatchObject({ intent: 'STYLE_SHAPE', color: 'orange' })
+    const cmds = await parseVoiceCommand('make it orange')
+    expect(cmds[0]).toMatchObject({ intent: 'STYLE_SHAPE', color: 'orange' })
   })
 })
 
@@ -784,5 +793,83 @@ describe('shapeReference: STYLE_SHAPE two-color disambiguation', () => {
       color: 'orange',
       shapeReference: { shapeType: 'rectangle', color: 'green' },
     })
+  })
+})
+
+// ─── 22. Multi-shape batch (grammar conjunction splitting) ────────────────────
+
+describe('Multi-shape batch — grammar conjunction splitting', () => {
+  it('"draw a red circle and a blue square" → batch of 2', () => {
+    const batch = grammarBatch('draw a red circle and a blue square')
+    expect(batch).not.toBeNull()
+    expect(batch).toHaveLength(2)
+    expect(batch![0]).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'circle', color: 'red' })
+    expect(batch![1]).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'rectangle', color: 'blue' })
+  })
+
+  it('"add a circle, a triangle, and a star" → batch of 3', () => {
+    const batch = grammarBatch('add a circle, a triangle, and a star')
+    expect(batch).not.toBeNull()
+    expect(batch).toHaveLength(3)
+    expect(batch![0]).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'circle' })
+    expect(batch![1]).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'triangle' })
+    expect(batch![2]).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'star' })
+  })
+
+  it('"draw a green arrow then a yellow rectangle" → batch of 2', () => {
+    const batch = grammarBatch('draw a green arrow then a yellow rectangle')
+    expect(batch).not.toBeNull()
+    expect(batch).toHaveLength(2)
+    expect(batch![0]).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'arrow', color: 'green' })
+    expect(batch![1]).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'rectangle', color: 'yellow' })
+  })
+
+  it('"draw a circle" (single) → batch of 1, no regression', () => {
+    const batch = grammarBatch('draw a circle')
+    expect(batch).not.toBeNull()
+    expect(batch).toHaveLength(1)
+    expect(batch![0]).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'circle' })
+  })
+
+  it('"undo" (single non-create) → batch of 1', () => {
+    const batch = grammarBatch('undo')
+    expect(batch).not.toBeNull()
+    expect(batch).toHaveLength(1)
+    expect(batch![0]).toMatchObject({ intent: 'UNDO' })
+  })
+
+  it('segment containing an unrecognized word → conjunction split gracefully degrades', () => {
+    // "draw a circle and frobnicate" — "frobnicate" won't parse as a shape.
+    // When the conjunction split fails on the second segment, the grammar returns null
+    // or falls back to a single command. Either is valid — the key is no crash.
+    const batch = grammarBatch('draw a circle and frobnicate')
+    // Either null (fell through to LLM) or a single-item batch with the circle
+    if (batch !== null) {
+      expect(batch[0]).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'circle' })
+    }
+  })
+
+  it('rawTranscript in each command of the batch equals the original full transcript', () => {
+    const raw = 'draw a red circle and a blue square'
+    const batch = grammarBatch(raw)!
+    expect(batch).not.toBeNull()
+    for (const cmd of batch) {
+      expect(cmd.rawTranscript).toBe(raw)
+    }
+  })
+
+  it('parseVoiceCommand("draw a red circle and a blue square") returns array of 2', async () => {
+    const cmds = await parseVoiceCommand('draw a red circle and a blue square')
+    expect(Array.isArray(cmds)).toBe(true)
+    expect(cmds).toHaveLength(2)
+    expect(cmds[0]).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'circle', color: 'red' })
+    expect(cmds[1]).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'rectangle', color: 'blue' })
+  })
+
+  it('parseVoiceCommand("undo") returns array of 1 (no regression for single commands)', async () => {
+    const cmds = await parseVoiceCommand('undo')
+    expect(Array.isArray(cmds)).toBe(true)
+    expect(cmds).toHaveLength(1)
+    expect(cmds[0]).toMatchObject({ intent: 'UNDO', steps: 1 })
   })
 })

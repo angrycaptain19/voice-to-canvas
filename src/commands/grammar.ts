@@ -4,11 +4,13 @@
  * Local regex grammar — the fast path (<5 ms, zero network calls) for the
  * ~80 % of voice commands that follow a predictable pattern.
  *
- * Returns a fully-populated `ShapeCommand` when a pattern matches, or `null`
- * when the transcript should be escalated to the LLM fallback.
+ * Returns a ShapeCommand[] when patterns match, or null when the transcript
+ * should be escalated to the LLM fallback.
  *
- * All patterns are case-insensitive and designed to tolerate typical STT noise
- * (extra articles, filler words, minor word-order variation).
+ * Compound utterances (e.g. "draw a red circle and a blue square") are split on
+ * conjunction tokens (and, then, also, plus, comma).  All segments must parse
+ * for the batch to be returned; if any segment fails, the function returns null
+ * and the whole transcript falls through to the LLM.
  *
  * @module
  */
@@ -24,9 +26,9 @@ const COLOR_MAP: Record<string, ShapeColor> = {
   orange: 'orange',
   yellow: 'yellow',
   violet: 'violet',
-  purple: 'violet', // alias
+  purple: 'violet',
   grey: 'grey',
-  gray: 'grey', // alias
+  gray: 'grey',
   black: 'black',
   white: 'white',
 }
@@ -111,10 +113,6 @@ function extractColor(text: string): ShapeColor | undefined {
   return m ? COLOR_MAP[m[1].toLowerCase()] : undefined
 }
 
-/**
- * Extract all color mentions from text in left-to-right order.
- * Used by STYLE_SHAPE to distinguish the target color from the new style color.
- */
 function extractAllColors(text: string): ShapeColor[] {
   const re = new RegExp(`\\b(${COLOR_PATTERN})\\b`, 'gi')
   const results: ShapeColor[] = []
@@ -186,16 +184,6 @@ function extractTimestamp(text: string): number | undefined {
   return undefined
 }
 
-/**
- * Extract an ordinal qualifier ('first', 'last', 'latest', or an integer >= 2)
- * from a transcript.
- *
- * Examples:
- *   "delete the last shape"      -> 'last'
- *   "rotate the first triangle"  -> 'first'
- *   "move the second circle"     -> 2
- *   "delete the third star"      -> 3
- */
 function extractOrdinal(text: string): ShapeReference['ordinal'] {
   if (/\b(last|latest|most\s+recent)\b/i.test(text)) return 'last'
   if (/\b(first)\b/i.test(text)) return 'first'
@@ -208,10 +196,6 @@ function extractOrdinal(text: string): ShapeReference['ordinal'] {
   return undefined
 }
 
-/**
- * Build a compact ShapeReference object, omitting undefined fields.
- * Returns undefined if all fields are undefined.
- */
 function buildShapeReference(fields: ShapeReference): ShapeReference | undefined {
   const ref: ShapeReference = {}
   if (fields.shapeType !== undefined) ref.shapeType = fields.shapeType
@@ -224,17 +208,10 @@ function buildShapeReference(fields: ShapeReference): ShapeReference | undefined
   return Object.keys(ref).length > 0 ? ref : undefined
 }
 
-// ─── Main grammar matcher ─────────────────────────────────────────────────────
+// ─── Private single-command matcher ──────────────────────────────────────────
 
-/**
- * Try to parse `transcript` using local regex patterns.
- *
- * @param transcript  - Normalised (trimmed) voice transcript.
- * @param rawTranscript - Original transcript string (stored in ShapeCommand.rawTranscript).
- * @returns A `ShapeCommand` on success, or `null` if no pattern matched.
- */
-export function matchGrammar(transcript: string, rawTranscript: string): ShapeCommand | null {
-  const t = transcript
+function matchSingleCommand(segment: string, rawTranscript: string): ShapeCommand | null {
+  const t = segment
 
   // 1. UNDO
   if (
@@ -355,7 +332,6 @@ export function matchGrammar(transcript: string, rawTranscript: string): ShapeCo
     const shapeType = extractShape(t)
     const color = extractColor(t)
     const ordinal = extractOrdinal(t)
-    // Check for "selected" / "selection" keywords -> useSelection
     const useSelection = /\b(?:selected|selection|current)\b/i.test(t) ? true : undefined
     const shapeReference = buildShapeReference({ shapeType, color, ordinal, useSelection })
     return {
@@ -370,7 +346,6 @@ export function matchGrammar(transcript: string, rawTranscript: string): ShapeCo
 
   // 14. STYLE_SHAPE -- verbs: make, change, color, set, use, give
   if (/^(?:make|change|color|set|use|give)\b/i.test(t)) {
-    // "make a circle" is CREATE_SHAPE -- guard against false positives
     const isCreate =
       /\b(?:a|an)\s+(?:\w+\s+)*(?:circle|ellipse|rectangle|triangle|arrow|line|star|text|frame|square|oval|box)\b/i.test(
         t,
@@ -378,7 +353,6 @@ export function matchGrammar(transcript: string, rawTranscript: string): ShapeCo
     if (!isCreate) {
       const allColors = extractAllColors(t)
       if (allColors.length >= 2) {
-        // "make the red circle blue" -- first color = target identifier, last = new style
         const targetColor = allColors[0]
         const newColor = allColors[allColors.length - 1]
         const shapeType = extractShape(t)
@@ -394,7 +368,6 @@ export function matchGrammar(transcript: string, rawTranscript: string): ShapeCo
       if (color !== undefined) {
         return { intent: 'STYLE_SHAPE', color, rawTranscript }
       }
-      // fill / strokeWidth: check for style keywords even without a color
       if (
         /\b(?:solid|none|empty|hollow|pattern|gradient|thick|thin|medium)\s+(?:fill|border|stroke|outline)\b/i.test(
           t,
@@ -456,29 +429,10 @@ export function matchGrammar(transcript: string, rawTranscript: string): ShapeCo
     }
   }
 
-  // 18. CREATE_SHAPE -- bare noun phrase (no verb required)
-  //
-  // Handles common STT output patterns where users name a shape directly,
-  // optionally preceded by an article / colour / size / "new" / "another",
-  // or followed by filler words like "please".
-  //
-  // Examples that resolve here (not matched by rule 17 above):
-  //   "circle"               -> CREATE_SHAPE { shapeType: 'circle' }
-  //   "a circle"             -> CREATE_SHAPE { shapeType: 'circle' }
-  //   "red circle"           -> CREATE_SHAPE { shapeType: 'circle', color: 'red' }
-  //   "circle please"        -> CREATE_SHAPE { shapeType: 'circle' }
-  //   "new rectangle"        -> CREATE_SHAPE { shapeType: 'rectangle' }
-  //   "another star"         -> CREATE_SHAPE { shapeType: 'star' }
-  //   "large blue triangle"  -> CREATE_SHAPE { shapeType: 'triangle', color: 'blue', size: 'large' }
+  // 18. CREATE_SHAPE -- bare noun phrase
   {
     const shapeType = extractShape(t)
     if (shapeType !== undefined) {
-      // Only treat as a bare-noun CREATE if the transcript is short enough that
-      // it is clearly just a shape name (with optional qualifiers).  We guard
-      // against accidentally swallowing longer sentences that should fall to the
-      // LLM (e.g. "give it the shape of a triangle").
-      // Strategy: strip known qualifiers + the shape word and check that what
-      // remains is only filler (articles, "new", "another", "please", "now", etc.).
       const FILLER_RE = /^(\s*(a|an|the|new|another|one|please|now|here|there|ok|okay)\s*)*$/i
       const stripped = t
         .replace(new RegExp('\\b(' + SHAPE_PATTERN + ')\\b', 'i'), '')
@@ -501,6 +455,50 @@ export function matchGrammar(transcript: string, rawTranscript: string): ShapeCo
     }
   }
 
-  // No pattern matched
   return null
+}
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+/**
+ * Try to parse `transcript` using local regex patterns.
+ *
+ * If the transcript contains conjunction tokens (and, then, also, plus, comma)
+ * AND starts with a CREATE verb, the function splits on those delimiters and
+ * attempts to parse each segment individually. Only if ALL segments parse does
+ * it return the full array; if any segment fails, the whole transcript falls
+ * through to the LLM (returns null).
+ *
+ * Single-command transcripts are wrapped in a length-1 array.
+ *
+ * @param transcript    - Normalised (trimmed) voice transcript.
+ * @param rawTranscript - Original transcript string (stored in ShapeCommand.rawTranscript).
+ * @returns An array of ShapeCommand (length >= 1) on success, or null if no
+ *          pattern matched.
+ */
+export function matchGrammar(transcript: string, rawTranscript: string): ShapeCommand[] | null {
+  const CONJUNCTION_SPLIT_RE = /(?<!\w)(?:and|then|also|plus)(?!\w)|,/i
+  const CREATE_VERB_RE = /^(?:draw|add|create|insert|put|place|make)(?!\w)/i
+
+  if (CONJUNCTION_SPLIT_RE.test(transcript) && CREATE_VERB_RE.test(transcript)) {
+    const segments = transcript
+      .split(CONJUNCTION_SPLIT_RE)
+      .map((s) => s.trim())
+      .filter(Boolean)
+
+    if (segments.length > 1) {
+      const cmds: ShapeCommand[] = []
+      for (const seg of segments) {
+        const cmd = matchSingleCommand(seg, rawTranscript)
+        if (cmd === null) {
+          return null
+        }
+        cmds.push(cmd)
+      }
+      return cmds
+    }
+  }
+
+  const single = matchSingleCommand(transcript, rawTranscript)
+  return single !== null ? [single] : null
 }

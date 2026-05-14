@@ -116,3 +116,11 @@ export const ShapeCommandSchema = z.object({
 })
 
 export type ShapeCommand = z.infer<typeof ShapeCommandSchema>
+
+// ---------------------------------------------------------------------------
+// ShapeCommandBatch -- ordered list of one or more commands parsed from a
+// single voice utterance (e.g. "draw a red circle and a blue square" → 2 cmds)
+// ---------------------------------------------------------------------------
+
+export const ShapeCommandBatchSchema = z.array(ShapeCommandSchema).min(1)
+export type ShapeCommandBatch = z.infer<typeof ShapeCommandBatchSchema>

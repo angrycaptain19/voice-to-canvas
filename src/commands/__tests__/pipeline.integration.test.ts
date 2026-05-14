@@ -94,9 +94,10 @@ function runExec(editor: MockEditor, action: TldrawAction) {
   executeTldrawAction(editor as never, action)
 }
 
-/** Parse via grammar only (synchronous fast-path). */
+/** Parse via grammar only (synchronous fast-path). Returns first command in batch for single-command tests. */
 function grammar(transcript: string) {
-  return matchGrammar(transcript.trim(), transcript)
+  const batch = matchGrammar(transcript.trim(), transcript)
+  return batch !== null ? batch[0] : null
 }
 
 // ===========================================================================
@@ -745,8 +746,8 @@ describe('Edge cases — grammar and parseVoiceCommand()', () => {
   it('rawTranscript is preserved verbatim including leading/trailing spaces', async () => {
     const raw = '  Draw a circle  '
     // parseVoiceCommand trims before grammar, but stores the original
-    const cmd = await parseVoiceCommand(raw)
-    expect(cmd.rawTranscript).toBe(raw)
+    const cmds = await parseVoiceCommand(raw)
+    expect(cmds[0].rawTranscript).toBe(raw)
   })
 })
 
@@ -773,12 +774,14 @@ describe('LLM fallback path — llmFallback()', () => {
       content: [
         {
           type: 'tool_use',
-          name: 'parse_voice_command',
+          name: 'parse_voice_commands',
           input: {
-            intent: 'CREATE_SHAPE',
-            shapeType: 'circle',
-            color: 'blue',
-            rawTranscript: 'please draw a wobbly circle',
+            commands: [{
+              intent: 'CREATE_SHAPE',
+              shapeType: 'circle',
+              color: 'blue',
+              rawTranscript: 'please draw a wobbly circle',
+            }],
           },
         },
       ],
@@ -786,7 +789,8 @@ describe('LLM fallback path — llmFallback()', () => {
 
     const { llmFallback } = await import('../llmFallback')
     const result = await llmFallback('please draw a wobbly circle')
-    expect(result).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'circle', color: 'blue' })
+    expect(result).not.toBeNull()
+    expect(result![0]).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'circle', color: 'blue' })
   })
 
   it('LLM API throws network error → llmFallback throws LLM_FALLBACK_ERROR', async () => {
@@ -803,10 +807,12 @@ describe('LLM fallback path — llmFallback()', () => {
       content: [
         {
           type: 'tool_use',
-          name: 'parse_voice_command',
+          name: 'parse_voice_commands',
           input: {
-            intent: 'NOT_A_REAL_INTENT',
-            rawTranscript: 'something weird',
+            commands: [{
+              intent: 'NOT_A_REAL_INTENT',
+              rawTranscript: 'something weird',
+            }],
           },
         },
       ],
@@ -823,11 +829,13 @@ describe('LLM fallback path — llmFallback()', () => {
       content: [
         {
           type: 'tool_use',
-          name: 'parse_voice_command',
+          name: 'parse_voice_commands',
           input: {
-            intent: 'CREATE_SHAPE',
-            shapeType: 'circle',
-            // missing rawTranscript — required by schema
+            commands: [{
+              intent: 'CREATE_SHAPE',
+              shapeType: 'circle',
+              // missing rawTranscript — required by schema
+            }],
           },
         },
       ],
@@ -1451,19 +1459,22 @@ describe('parseVoiceCommand() — LLM fallback integration (grammar null path)',
       content: [
         {
           type: 'tool_use',
-          name: 'parse_voice_command',
+          name: 'parse_voice_commands',
           input: {
-            intent: 'CREATE_SHAPE',
-            shapeType: 'circle',
-            rawTranscript: 'do a wobbly circle please',
+            commands: [{
+              intent: 'CREATE_SHAPE',
+              shapeType: 'circle',
+              rawTranscript: 'do a wobbly circle please',
+            }],
           },
         },
       ],
     })
 
     // "do a wobbly circle please" — grammar won't match this
-    const cmd = await parseVoiceCommand('do a wobbly circle please')
-    expect(cmd).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'circle' })
+    const cmds = await parseVoiceCommand('do a wobbly circle please')
+    expect(Array.isArray(cmds)).toBe(true)
+    expect(cmds[0]).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'circle' })
     expect(mockAnthropicCreate).toHaveBeenCalledOnce()
   })
 

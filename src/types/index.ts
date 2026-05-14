@@ -30,9 +30,11 @@ export {
   IntentSchema,
   ShapeReferenceSchema,
   ShapeCommandSchema,
+  ShapeCommandBatchSchema,
   type Intent,
   type ShapeReference,
   type ShapeCommand,
+  type ShapeCommandBatch,
 } from './commands'
 
 // ---------------------------------------------------------------------------

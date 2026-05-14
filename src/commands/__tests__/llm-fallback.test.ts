@@ -53,19 +53,23 @@ describe('llmFallback()', () => {
       content: [
         {
           type: 'tool_use',
-          name: 'parse_voice_command',
+          name: 'parse_voice_commands',
           input: {
-            intent: 'CREATE_SHAPE',
-            shapeType: 'circle',
-            color: 'blue',
-            rawTranscript: 'please draw a wobbly blue circle',
+            commands: [{
+              intent: 'CREATE_SHAPE',
+              shapeType: 'circle',
+              color: 'blue',
+              rawTranscript: 'please draw a wobbly blue circle',
+            }],
           },
         },
       ],
     })
 
     const result = await llmFallback('please draw a wobbly blue circle')
-    expect(result).toMatchObject({
+    expect(result).not.toBeNull()
+    expect(Array.isArray(result)).toBe(true)
+    expect(result![0]).toMatchObject({
       intent: 'CREATE_SHAPE',
       shapeType: 'circle',
       color: 'blue',
@@ -78,17 +82,20 @@ describe('llmFallback()', () => {
       content: [
         {
           type: 'tool_use',
-          name: 'parse_voice_command',
+          name: 'parse_voice_commands',
           input: {
-            intent: 'DELETE_ALL',
-            rawTranscript: 'wipe the canvas',
+            commands: [{
+              intent: 'DELETE_ALL',
+              rawTranscript: 'wipe the canvas',
+            }],
           },
         },
       ],
     })
 
     const result = await llmFallback('wipe the canvas')
-    expect(result).toMatchObject({ intent: 'DELETE_ALL' })
+    expect(result).not.toBeNull()
+    expect(result![0]).toMatchObject({ intent: 'DELETE_ALL' })
   })
 
   it('LLM API throws network error → throws LLM_FALLBACK_ERROR', async () => {
@@ -104,10 +111,12 @@ describe('llmFallback()', () => {
       content: [
         {
           type: 'tool_use',
-          name: 'parse_voice_command',
+          name: 'parse_voice_commands',
           input: {
-            intent: 'NOT_A_REAL_INTENT',
-            rawTranscript: 'something weird',
+            commands: [{
+              intent: 'NOT_A_REAL_INTENT',
+              rawTranscript: 'something weird',
+            }],
           },
         },
       ],
@@ -122,11 +131,13 @@ describe('llmFallback()', () => {
       content: [
         {
           type: 'tool_use',
-          name: 'parse_voice_command',
+          name: 'parse_voice_commands',
           input: {
-            intent: 'CREATE_SHAPE',
-            shapeType: 'circle',
-            // rawTranscript intentionally omitted — Zod will reject
+            commands: [{
+              intent: 'CREATE_SHAPE',
+              shapeType: 'circle',
+              // rawTranscript intentionally omitted — Zod will reject
+            }],
           },
         },
       ],
@@ -157,18 +168,21 @@ describe('llmFallback()', () => {
       content: [
         {
           type: 'tool_use',
-          name: 'parse_voice_command',
+          name: 'parse_voice_commands',
           input: {
-            intent: 'UNDO',
-            steps: 3,
-            rawTranscript: 'go back three times',
+            commands: [{
+              intent: 'UNDO',
+              steps: 3,
+              rawTranscript: 'go back three times',
+            }],
           },
         },
       ],
     })
 
     const result = await llmFallback('go back three times')
-    expect(result).toMatchObject({ intent: 'UNDO', steps: 3 })
+    expect(result).not.toBeNull()
+    expect(result![0]).toMatchObject({ intent: 'UNDO', steps: 3 })
   })
 
   it('LLM returns STYLE_SHAPE with violet color → color field is violet', async () => {
@@ -176,18 +190,21 @@ describe('llmFallback()', () => {
       content: [
         {
           type: 'tool_use',
-          name: 'parse_voice_command',
+          name: 'parse_voice_commands',
           input: {
-            intent: 'STYLE_SHAPE',
-            color: 'violet',
-            rawTranscript: 'make it purple',
+            commands: [{
+              intent: 'STYLE_SHAPE',
+              color: 'violet',
+              rawTranscript: 'make it purple',
+            }],
           },
         },
       ],
     })
 
     const result = await llmFallback('make it purple')
-    expect(result).toMatchObject({ intent: 'STYLE_SHAPE', color: 'violet' })
+    expect(result).not.toBeNull()
+    expect(result![0]).toMatchObject({ intent: 'STYLE_SHAPE', color: 'violet' })
   })
 
   it('VITE_ANTHROPIC_API_KEY not set → throws LLM_FALLBACK_ERROR', async () => {

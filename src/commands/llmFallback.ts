@@ -147,8 +147,7 @@ let _client: OpenAI | null = null
 function getClient(): OpenAI {
   if (_client) return _client
 
-  const env = (import.meta as unknown as { env?: Record<string, string> }).env ?? {}
-  const apiKey = env.VITE_OPENAI_API_KEY
+  const apiKey = import.meta.env.VITE_OPENAI_API_KEY
 
   if (!apiKey) {
     throw createVoiceError('LLM_FALLBACK_ERROR', {
@@ -209,4 +208,14 @@ export async function llmFallback(transcript: string): Promise<ShapeCommand | nu
   // Validate against the shared Zod schema — never return unvalidated data.
   const result = ShapeCommandSchema.safeParse(raw)
   return result.success ? result.data : null
+}
+
+// ─── Test helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Reset the cached OpenAI client. Only exported for use in test files.
+ * @internal
+ */
+export function _resetClientForTest(): void {
+  _client = null
 }

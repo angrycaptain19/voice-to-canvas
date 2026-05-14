@@ -11,7 +11,7 @@
  *   - matchGrammar() is tested directly (pure, synchronous, no mocks needed)
  *   - parseVoiceCommand() is tested for the grammar fast-path and error paths
  *   - executeTldrawAction() receives a MockEditor (vitest spy functions)
- *   - The OpenAI client is mocked via vi.mock('openai') to avoid real API calls
+ *   - The Anthropic client is mocked via vi.mock('@anthropic-ai/sdk') to avoid real API calls
  *
  * @module
  */
@@ -27,14 +27,14 @@ import type { TldrawAction } from '../../types'
 // Mock OpenAI so no real network calls happen
 // ---------------------------------------------------------------------------
 
-const mockOpenAICreate = vi.fn()
+const mockAnthropicCreate = vi.fn()
 
-vi.mock('openai', () => {
-  // Use a real function so `new OpenAI(...)` works correctly
-  function MockOpenAI(_opts: unknown) {
-    return { chat: { completions: { create: mockOpenAICreate } } }
+vi.mock('@anthropic-ai/sdk', () => {
+  // Use a real function so `new Anthropic(...)` works correctly
+  function MockAnthropic(_opts: unknown) {
+    return { messages: { create: mockAnthropicCreate } }
   }
-  return { default: MockOpenAI }
+  return { default: MockAnthropic }
 })
 
 // ---------------------------------------------------------------------------
@@ -756,9 +756,9 @@ describe('Edge cases — grammar and parseVoiceCommand()', () => {
 
 describe('LLM fallback path — llmFallback()', () => {
   beforeEach(() => {
-    mockOpenAICreate.mockReset()
+    mockAnthropicCreate.mockReset()
     // Set the API key so getClient() succeeds
-    vi.stubEnv('VITE_OPENAI_API_KEY', 'sk-test-mock-key')
+    vi.stubEnv('VITE_ANTHROPIC_API_KEY', 'sk-test-mock-key')
     // Clear cached _client so getClient() re-runs with the stubbed env
     _resetClientForTest()
   })
@@ -769,19 +769,16 @@ describe('LLM fallback path — llmFallback()', () => {
   })
 
   it('successful LLM response → returns parsed ShapeCommand', async () => {
-    mockOpenAICreate.mockResolvedValueOnce({
-      choices: [
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [
         {
-          message: {
-            function_call: {
-              name: 'parse_voice_command',
-              arguments: JSON.stringify({
-                intent: 'CREATE_SHAPE',
-                shapeType: 'circle',
-                color: 'blue',
-                rawTranscript: 'please draw a wobbly circle',
-              }),
-            },
+          type: 'tool_use',
+          name: 'parse_voice_command',
+          input: {
+            intent: 'CREATE_SHAPE',
+            shapeType: 'circle',
+            color: 'blue',
+            rawTranscript: 'please draw a wobbly circle',
           },
         },
       ],
@@ -793,7 +790,7 @@ describe('LLM fallback path — llmFallback()', () => {
   })
 
   it('LLM API throws network error → llmFallback throws LLM_FALLBACK_ERROR', async () => {
-    mockOpenAICreate.mockRejectedValueOnce(new Error('Network timeout'))
+    mockAnthropicCreate.mockRejectedValueOnce(new Error('Network timeout'))
 
     const { llmFallback } = await import('../llmFallback')
     await expect(llmFallback('some unknown command')).rejects.toMatchObject({
@@ -802,17 +799,14 @@ describe('LLM fallback path — llmFallback()', () => {
   })
 
   it('LLM response fails Zod validation (invalid intent) → llmFallback returns null', async () => {
-    mockOpenAICreate.mockResolvedValueOnce({
-      choices: [
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [
         {
-          message: {
-            function_call: {
-              name: 'parse_voice_command',
-              arguments: JSON.stringify({
-                intent: 'NOT_A_REAL_INTENT',
-                rawTranscript: 'something weird',
-              }),
-            },
+          type: 'tool_use',
+          name: 'parse_voice_command',
+          input: {
+            intent: 'NOT_A_REAL_INTENT',
+            rawTranscript: 'something weird',
           },
         },
       ],
@@ -825,18 +819,15 @@ describe('LLM fallback path — llmFallback()', () => {
   })
 
   it('LLM response missing rawTranscript (invalid schema) → llmFallback returns null', async () => {
-    mockOpenAICreate.mockResolvedValueOnce({
-      choices: [
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [
         {
-          message: {
-            function_call: {
-              name: 'parse_voice_command',
-              arguments: JSON.stringify({
-                intent: 'CREATE_SHAPE',
-                shapeType: 'circle',
-                // missing rawTranscript — required by schema
-              }),
-            },
+          type: 'tool_use',
+          name: 'parse_voice_command',
+          input: {
+            intent: 'CREATE_SHAPE',
+            shapeType: 'circle',
+            // missing rawTranscript — required by schema
           },
         },
       ],
@@ -848,8 +839,8 @@ describe('LLM fallback path — llmFallback()', () => {
   })
 
   it('LLM returns null function_call → llmFallback returns null', async () => {
-    mockOpenAICreate.mockResolvedValueOnce({
-      choices: [{ message: { function_call: null } }],
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [{ type: 'text', text: 'I cannot help with that.' }],
     })
 
     const { llmFallback } = await import('../llmFallback')
@@ -857,19 +848,8 @@ describe('LLM fallback path — llmFallback()', () => {
     expect(result).toBeNull()
   })
 
-  it('LLM returns malformed JSON arguments → llmFallback throws LLM_FALLBACK_ERROR', async () => {
-    mockOpenAICreate.mockResolvedValueOnce({
-      choices: [
-        {
-          message: {
-            function_call: {
-              name: 'parse_voice_command',
-              arguments: '{ this is not : valid json !!!',
-            },
-          },
-        },
-      ],
-    })
+  it('LLM API throws unexpected error → llmFallback throws LLM_FALLBACK_ERROR', async () => {
+    mockAnthropicCreate.mockRejectedValueOnce(new Error('Unexpected API error'))
 
     const { llmFallback } = await import('../llmFallback')
     await expect(llmFallback('some transcript')).rejects.toMatchObject({
@@ -878,7 +858,7 @@ describe('LLM fallback path — llmFallback()', () => {
   })
 
   it('LLM returns empty choices array → llmFallback returns null', async () => {
-    mockOpenAICreate.mockResolvedValueOnce({ choices: [] })
+    mockAnthropicCreate.mockResolvedValueOnce({ content: [] })
 
     const { llmFallback } = await import('../llmFallback')
     const result = await llmFallback('any command')
@@ -1455,8 +1435,8 @@ describe('Executor — default/fallthrough branches (coverage)', () => {
 
 describe('parseVoiceCommand() — LLM fallback integration (grammar null path)', () => {
   beforeEach(() => {
-    mockOpenAICreate.mockReset()
-    vi.stubEnv('VITE_OPENAI_API_KEY', 'sk-test-mock-key')
+    mockAnthropicCreate.mockReset()
+    vi.stubEnv('VITE_ANTHROPIC_API_KEY', 'sk-test-mock-key')
     _resetClientForTest()
   })
 
@@ -1467,18 +1447,15 @@ describe('parseVoiceCommand() — LLM fallback integration (grammar null path)',
 
   it('unknown transcript → grammar returns null → LLM fallback is called → returns ShapeCommand', async () => {
     // LLM returns a valid CREATE_SHAPE response
-    mockOpenAICreate.mockResolvedValueOnce({
-      choices: [
+    mockAnthropicCreate.mockResolvedValueOnce({
+      content: [
         {
-          message: {
-            function_call: {
-              name: 'parse_voice_command',
-              arguments: JSON.stringify({
-                intent: 'CREATE_SHAPE',
-                shapeType: 'circle',
-                rawTranscript: 'do a wobbly circle please',
-              }),
-            },
+          type: 'tool_use',
+          name: 'parse_voice_command',
+          input: {
+            intent: 'CREATE_SHAPE',
+            shapeType: 'circle',
+            rawTranscript: 'do a wobbly circle please',
           },
         },
       ],
@@ -1487,22 +1464,22 @@ describe('parseVoiceCommand() — LLM fallback integration (grammar null path)',
     // "do a wobbly circle please" — grammar won't match this
     const cmd = await parseVoiceCommand('do a wobbly circle please')
     expect(cmd).toMatchObject({ intent: 'CREATE_SHAPE', shapeType: 'circle' })
-    expect(mockOpenAICreate).toHaveBeenCalledOnce()
+    expect(mockAnthropicCreate).toHaveBeenCalledOnce()
   })
 
   it('unknown transcript → grammar returns null → LLM returns null → throws PARSE_FAILURE', async () => {
-    // LLM returns empty choices (resolves to null from llmFallback)
-    mockOpenAICreate.mockResolvedValueOnce({ choices: [] })
+    // LLM returns empty content (resolves to null from llmFallback)
+    mockAnthropicCreate.mockResolvedValueOnce({ content: [] })
 
     await expect(parseVoiceCommand('xyzzy frobniculate the quux')).rejects.toMatchObject({
       code: 'PARSE_FAILURE',
     })
-    expect(mockOpenAICreate).toHaveBeenCalledOnce()
+    expect(mockAnthropicCreate).toHaveBeenCalledOnce()
   })
 
   it('unknown transcript → grammar returns null → LLM throws LLM_FALLBACK_ERROR → error propagates', async () => {
     // LLM API throws a network error
-    mockOpenAICreate.mockRejectedValueOnce(new Error('API unreachable'))
+    mockAnthropicCreate.mockRejectedValueOnce(new Error('API unreachable'))
 
     await expect(parseVoiceCommand('frobnicate the widget')).rejects.toMatchObject({
       code: 'LLM_FALLBACK_ERROR',

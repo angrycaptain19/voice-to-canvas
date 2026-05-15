@@ -79,6 +79,10 @@ const StyleShapeActionSchema = z.object({
   targetId: z.string().optional(),
   shapeReference: ShapeReferenceSchema.optional(),
   color: ShapeColorSchema.optional(),
+  fill: z.enum(['none', 'semi', 'solid', 'pattern']).optional(),
+  dash: z.enum(['draw', 'solid', 'dashed', 'dotted']).optional(),
+  opacity: z.number().min(0).max(1).optional(),
+  labelSize: z.enum(['s', 'm', 'l', 'xl']).optional(),
 })
 
 const SelectShapeActionSchema = z.object({

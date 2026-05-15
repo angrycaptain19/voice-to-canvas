@@ -27,6 +27,9 @@ import {
   type Editor,
   type TLShapeId,
   DefaultColorStyle,
+  DefaultFillStyle,
+  DefaultDashStyle,
+  DefaultSizeStyle,
   createShapeId,
   toRichText,
 } from 'tldraw'
@@ -456,17 +459,47 @@ function handleStyleShape(
   editor: Editor,
   action: Extract<TldrawAction, { type: 'STYLE_SHAPE' }>,
 ): VoiceError | undefined {
-  if (!action.color) return undefined
+  const hasAnyStyle =
+    action.color !== undefined ||
+    action.fill !== undefined ||
+    action.dash !== undefined ||
+    action.opacity !== undefined ||
+    action.labelSize !== undefined
 
-  const tldrawColor = toTldrawColor(action.color)
+  if (!hasAnyStyle) return undefined
+
   const { ids, error } = resolveTargetIds(editor, action.shapeReference, action.targetId)
 
   if (ids.length > 0) {
     editor.setSelectedShapes(ids)
-    editor.setStyleForSelectedShapes(DefaultColorStyle, tldrawColor as never)
   }
 
-  editor.setStyleForNextShapes(DefaultColorStyle, tldrawColor as never)
+  if (action.color !== undefined) {
+    const tldrawColor = toTldrawColor(action.color)
+    if (ids.length > 0) editor.setStyleForSelectedShapes(DefaultColorStyle, tldrawColor as never)
+    editor.setStyleForNextShapes(DefaultColorStyle, tldrawColor as never)
+  }
+
+  if (action.fill !== undefined) {
+    if (ids.length > 0) editor.setStyleForSelectedShapes(DefaultFillStyle, action.fill as never)
+    editor.setStyleForNextShapes(DefaultFillStyle, action.fill as never)
+  }
+
+  if (action.dash !== undefined) {
+    if (ids.length > 0) editor.setStyleForSelectedShapes(DefaultDashStyle, action.dash as never)
+    editor.setStyleForNextShapes(DefaultDashStyle, action.dash as never)
+  }
+
+  if (action.labelSize !== undefined) {
+    if (ids.length > 0) editor.setStyleForSelectedShapes(DefaultSizeStyle, action.labelSize as never)
+    editor.setStyleForNextShapes(DefaultSizeStyle, action.labelSize as never)
+  }
+
+  if (action.opacity !== undefined) {
+    if (ids.length > 0) editor.setOpacityForSelectedShapes(action.opacity)
+    editor.setOpacityForNextShapes(action.opacity)
+  }
+
   return error
 }
 

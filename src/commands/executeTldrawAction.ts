@@ -127,10 +127,18 @@ function resolvePosition(
 /**
  * Build a ShapeRef from an action's shapeReference field, falling back to
  * selection-based targeting when no shapeReference is present.
+ *
+ * When there is no shapeReference AND no explicit ID:
+ *  - If something is currently selected → use the selection (existing behaviour)
+ *  - If nothing is selected             → fall back to the most recently created
+ *    shape (`ordinal: 'last'`) so that commands like "move to the top" with an
+ *    empty selection still work on the last-drawn shape instead of silently
+ *    no-oping.
  */
 function buildShapeRef(
   shapeReference: ShapeReference | undefined,
   explicitTargetId: string | undefined,
+  editor: Editor,
 ): ShapeRef {
   if (explicitTargetId) {
     // Explicit programmatic ID — we'll handle it before calling the resolver
@@ -147,8 +155,11 @@ function buildShapeRef(
       useSelection: shapeReference.useSelection,
     }
   }
-  // No shapeReference and no explicit ID → fall back to current selection
-  return { useSelection: true }
+  // No shapeReference and no explicit ID — prefer the current selection, but
+  // if nothing is selected fall back to the most-recently-created shape.
+  const selected = editor.getSelectedShapeIds()
+  if (selected.length > 0) return { useSelection: true }
+  return { ordinal: 'last' }
 }
 
 /**
@@ -169,7 +180,7 @@ function resolveTargetIds(
     return { ids: [explicitTargetId as TLShapeId] }
   }
 
-  const ref = buildShapeRef(shapeReference, explicitTargetId)
+  const ref = buildShapeRef(shapeReference, explicitTargetId, editor)
   const result = resolveShapeReference(editor, ref)
 
   if (result.kind === 'found') {

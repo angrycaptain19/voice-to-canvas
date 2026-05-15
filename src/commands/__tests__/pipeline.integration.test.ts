@@ -680,40 +680,56 @@ describe('Edge cases — grammar and parseVoiceCommand()', () => {
     expect(grammar('group these shapes')).toBeNull()
   })
 
-  // ── 8.3 Ambiguous pronoun with no selection (executor behavior) ───────────
+  // ── 8.3 No selection → fall back to most-recently-created shape ───────────
+  // When nothing is selected and no shapeReference is given, the executor now
+  // falls back to `ordinal: 'last'` (the most recently created shape) instead
+  // of silently no-oping.
 
-  it('MOVE_SHAPE with no selected shapes → executor is a no-op', () => {
+  it('MOVE_SHAPE with no selected shapes → falls back to last shape (not a no-op)', () => {
     const editor = makeMockEditor({
       getSelectedShapeIds: vi.fn().mockReturnValue([]),
     })
     runExec(editor, { type: 'MOVE_SHAPE', position: 'center' })
-    expect(editor.updateShapes).not.toHaveBeenCalled()
+    // ordinal:'last' resolves to the last shape on the page → updateShapes IS called
+    expect(editor.updateShapes).toHaveBeenCalled()
   })
 
-  it('RESIZE_SHAPE with no selected shapes → executor is a no-op', () => {
+  it('RESIZE_SHAPE with no selected shapes → falls back to last shape (not a no-op)', () => {
     const editor = makeMockEditor({
       getSelectedShapeIds: vi.fn().mockReturnValue([]),
     })
     runExec(editor, { type: 'RESIZE_SHAPE', size: 'large' })
-    expect(editor.updateShapes).not.toHaveBeenCalled()
-    expect(editor.resizeShape).not.toHaveBeenCalled()
+    // ordinal:'last' resolves to the last shape on the page → resize IS called
+    const resized = editor.updateShapes.mock.calls.length + editor.resizeShape.mock.calls.length
+    expect(resized).toBeGreaterThan(0)
   })
 
-  it('ROTATE_SHAPE with no selected shapes → rotateShapesBy not called', () => {
+  it('ROTATE_SHAPE with no selected shapes → falls back to last shape, rotateShapesBy called', () => {
     const editor = makeMockEditor({
       getSelectedShapeIds: vi.fn().mockReturnValue([]),
     })
     runExec(editor, { type: 'ROTATE_SHAPE', angle: 45 })
-    // ids is empty, so rotateShapesBy should NOT be called
-    expect(editor.rotateShapesBy).not.toHaveBeenCalled()
+    // ordinal:'last' resolves to the last shape on the page → rotateShapesBy IS called
+    expect(editor.rotateShapesBy).toHaveBeenCalled()
   })
 
-  it('DELETE_SHAPE with no selected shapes → executor is a no-op', () => {
+  it('DELETE_SHAPE with no selected shapes → falls back to last shape (not a no-op)', () => {
     const editor = makeMockEditor({
       getSelectedShapeIds: vi.fn().mockReturnValue([]),
     })
     runExec(editor, { type: 'DELETE_SHAPE' })
-    expect(editor.deleteShapes).not.toHaveBeenCalled()
+    // ordinal:'last' resolves to the last shape on the page → deleteShapes IS called
+    expect(editor.deleteShapes).toHaveBeenCalled()
+  })
+
+  it('MOVE_SHAPE with empty canvas and no selection → executor is a no-op', () => {
+    const editor = makeMockEditor({
+      getSelectedShapeIds: vi.fn().mockReturnValue([]),
+      getCurrentPageShapes: vi.fn().mockReturnValue([]),
+    })
+    runExec(editor, { type: 'MOVE_SHAPE', position: 'center' })
+    // Nothing on canvas at all → still a no-op (no shape to fall back to)
+    expect(editor.updateShapes).not.toHaveBeenCalled()
   })
 
   // ── 8.4 Malformed / unknown color values ─────────────────────────────────

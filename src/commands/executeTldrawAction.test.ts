@@ -363,6 +363,39 @@ describe('MOVE_SHAPE', () => {
     )
   })
 
+  it('calls resolver with useSelection:true when shapes ARE selected and no shapeReference provided', () => {
+    // selection is non-empty (set up in beforeEach)
+    run(editor, { type: 'MOVE_SHAPE', dx: 10 })
+
+    expect(mockResolveShapeReference).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ useSelection: true }),
+    )
+  })
+
+  it('falls back to ordinal:last when nothing is selected and no shapeReference provided', () => {
+    // override: empty selection
+    editor.getSelectedShapeIds.mockReturnValue([])
+    run(editor, { type: 'MOVE_SHAPE', dx: 10 })
+
+    expect(mockResolveShapeReference).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ ordinal: 'last' }),
+    )
+  })
+
+  it('"move to the top" with no selection uses ordinal:last fallback', () => {
+    editor.getSelectedShapeIds.mockReturnValue([])
+    run(editor, { type: 'MOVE_SHAPE', position: 'top' })
+
+    expect(mockResolveShapeReference).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ ordinal: 'last' }),
+    )
+    // Resolver returned a shape → updateShapes was called
+    expect(editor.updateShapes).toHaveBeenCalled()
+  })
+
   it('calls resolver with shapeReference fields when provided', () => {
     mockResolveShapeReference.mockReturnValue({ kind: 'found', ids: ['shape:test-geo' as TLShapeId] })
     run(editor, {
@@ -547,6 +580,16 @@ describe('ROTATE_SHAPE', () => {
       expect.objectContaining({ shapeType: 'rectangle' }),
     )
     expect(editor.rotateShapesBy).toHaveBeenCalledOnce()
+  })
+
+  it('falls back to ordinal:last when nothing selected and no shapeReference provided', () => {
+    editor.getSelectedShapeIds.mockReturnValue([])
+    run(editor, { type: 'ROTATE_SHAPE', angle: 90 })
+
+    expect(mockResolveShapeReference).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ ordinal: 'last' }),
+    )
   })
 })
 

@@ -183,6 +183,91 @@ describe('MOVE_SHAPE', () => {
       position: 'top-right',
     })
   })
+
+  // ── Directional nudges ──────────────────────────────────────────────────
+
+  it('"move it right" → MOVE_SHAPE with dx:100', () => {
+    expect(grammar('move it right')).toMatchObject({
+      intent: 'MOVE_SHAPE',
+      dx: 100,
+    })
+  })
+
+  it('"move it left" → MOVE_SHAPE with dx:-100', () => {
+    expect(grammar('move it left')).toMatchObject({
+      intent: 'MOVE_SHAPE',
+      dx: -100,
+    })
+  })
+
+  it('"move it up" → MOVE_SHAPE with dy:-100', () => {
+    expect(grammar('move it up')).toMatchObject({
+      intent: 'MOVE_SHAPE',
+      dy: -100,
+    })
+  })
+
+  it('"move it down" → MOVE_SHAPE with dy:100', () => {
+    expect(grammar('move it down')).toMatchObject({
+      intent: 'MOVE_SHAPE',
+      dy: 100,
+    })
+  })
+
+  it('"move it right by 50" → dx:50', () => {
+    const cmd = grammar('move it right by 50')
+    expect(cmd).toMatchObject({ intent: 'MOVE_SHAPE', dx: 50 })
+  })
+
+  it('"move it right 50px" → dx:50', () => {
+    const cmd = grammar('move it right 50px')
+    expect(cmd).toMatchObject({ intent: 'MOVE_SHAPE', dx: 50 })
+  })
+
+  it('"move it right 50 pixels" → dx:50', () => {
+    const cmd = grammar('move it right 50 pixels')
+    expect(cmd).toMatchObject({ intent: 'MOVE_SHAPE', dx: 50 })
+  })
+
+  it('"move the circle right" → MOVE_SHAPE with shapeReference and dx:100', () => {
+    const cmd = grammar('move the circle right')
+    expect(cmd).not.toBeNull()
+    expect(cmd?.intent).toBe('MOVE_SHAPE')
+    expect(cmd?.dx).toBe(100)
+    expect(cmd?.shapeReference).toMatchObject({ shapeType: 'circle' })
+  })
+
+  it('"move the circle right by 50" → shapeReference + dx:50', () => {
+    const cmd = grammar('move the circle right by 50')
+    expect(cmd).not.toBeNull()
+    expect(cmd?.intent).toBe('MOVE_SHAPE')
+    expect(cmd?.dx).toBe(50)
+    expect(cmd?.shapeReference).toMatchObject({ shapeType: 'circle' })
+  })
+
+  it('"nudge up" → MOVE_SHAPE with dy:-100', () => {
+    expect(grammar('nudge up')).toMatchObject({ intent: 'MOVE_SHAPE', dy: -100 })
+  })
+
+  it('"move" alone with no extractable info → null (escalate to LLM)', () => {
+    expect(grammar('move')).toBeNull()
+  })
+
+  it('"move it to the top-right" still uses position, not nudge', () => {
+    const cmd = grammar('move it to the top-right')
+    expect(cmd).toMatchObject({ intent: 'MOVE_SHAPE', position: 'top-right' })
+    expect(cmd?.dx).toBeUndefined()
+  })
+
+  it('"move the red circle to the top" → shapeReference + position (no dx/dy)', () => {
+    const cmd = grammar('move the red circle to the top')
+    expect(cmd).toMatchObject({
+      intent: 'MOVE_SHAPE',
+      position: 'top',
+      shapeReference: { shapeType: 'circle', color: 'red' },
+    })
+    expect(cmd?.dx).toBeUndefined()
+  })
 })
 
 // ─── 3. RESIZE_SHAPE ─────────────────────────────────────────────────────────

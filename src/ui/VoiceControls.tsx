@@ -10,10 +10,9 @@
  *   Hold >= 300 ms -> push-to-talk (release to stop)
  *   Tap  < 300 ms  -> toggle (click again to stop)
  *
- * Keyboard shortcut: Space (when not inside a text field) activates /
- * deactivates the mic.  While active the mic stays open continuously;
- * shapes appear automatically as sentences are committed — no manual stop
- * needed.  A second Space press fully deactivates the mic.
+ * Keyboard shortcut: Space (when not inside a text field) is push-to-talk —
+ * hold Space to record, release Space to stop.  While held the mic is active
+ * and interim transcript is visible; releasing Space commits the result.
  *
  * ## Composition
  *
@@ -330,7 +329,7 @@ export function VoiceControls({
   const handleKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLButtonElement>) => {
       if (isDisabled) return
-      if (e.key === ' ' || e.key === 'Enter') {
+      if (e.key === 'Enter') {
         e.preventDefault()
         if (isListening) {
           toggleOnRef.current = false
@@ -340,31 +339,43 @@ export function VoiceControls({
           onStart()
         }
       }
+      // Space on the button is handled globally — prevent default scroll only
+      if (e.key === ' ') {
+        e.preventDefault()
+      }
     },
     [isDisabled, isListening, onStart, onStop],
   )
 
-  // Global Space shortcut
+  // Global Space shortcut — push-to-talk: keydown starts, keyup stops
   useEffect(() => {
-    const handler = (e: KeyboardEvent): void => {
-      const target = e.target as HTMLElement
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
-        return
-      }
-      if (e.code === 'Space' && !e.repeat) {
-        e.preventDefault()
-        if (status === 'listening') {
-          toggleOnRef.current = false
-          onStop()
-        } else if (status === 'idle') {
-          toggleOnRef.current = true
-          onStart()
-        }
+    const isTextField = (t: EventTarget | null): boolean => {
+      if (!(t instanceof HTMLElement)) return false
+      return t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable
+    }
+
+    const handleKeyDown = (e: KeyboardEvent): void => {
+      if (e.code !== 'Space' || e.repeat || isTextField(e.target)) return
+      e.preventDefault()
+      if (status === 'idle' || status === 'error') {
+        onStart()
       }
     }
 
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
+    const handleKeyUp = (e: KeyboardEvent): void => {
+      if (e.code !== 'Space' || isTextField(e.target)) return
+      e.preventDefault()
+      if (status === 'listening') {
+        onStop()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
   }, [status, onStart, onStop])
 
   // Reset refs when status flips to idle/error externally
@@ -437,7 +448,7 @@ export function VoiceControls({
   } else if (status === 'processing') {
     ariaLabel = 'Processing voice command'
   } else {
-    ariaLabel = 'Activate mic -- hold for push-to-talk, tap to toggle, or press Space'
+    ariaLabel = 'Activate mic — hold to talk, tap to toggle, or hold Space'
   }
 
   let liveAnnouncement = ''

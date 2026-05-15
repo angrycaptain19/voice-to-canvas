@@ -69,6 +69,8 @@ function makeMockEditor(overrides?: Record<string, unknown>) {
     getCurrentPageShapes: vi.fn().mockReturnValue([MOCK_SHAPE_GEO, MOCK_SHAPE_ARROW]),
     setStyleForSelectedShapes: vi.fn(),
     setStyleForNextShapes: vi.fn(),
+    setOpacityForSelectedShapes: vi.fn(),
+    setOpacityForNextShapes: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
     ...overrides,
@@ -723,11 +725,154 @@ describe('STYLE_SHAPE', () => {
     expect(editor.setSelectedShapes).toHaveBeenCalledWith(['shape:other'])
   })
 
-  it('does nothing when color is omitted', () => {
+  it('does nothing when no style fields are provided', () => {
     run(editor, { type: 'STYLE_SHAPE' })
 
     expect(editor.setStyleForSelectedShapes).not.toHaveBeenCalled()
     expect(editor.setStyleForNextShapes).not.toHaveBeenCalled()
+    expect(editor.setOpacityForSelectedShapes).not.toHaveBeenCalled()
+    expect(editor.setOpacityForNextShapes).not.toHaveBeenCalled()
+  })
+
+  it('sets fill style on selected shapes and next shapes', () => {
+    run(editor, { type: 'STYLE_SHAPE', fill: 'solid' })
+
+    expect(editor.setStyleForSelectedShapes).toHaveBeenCalledOnce()
+    const [fillStyle, fillValue] = editor.setStyleForSelectedShapes.mock.calls[0]
+    expect(fillStyle.id).toBe('tldraw:fill')
+    expect(fillValue).toBe('solid')
+    expect(editor.setStyleForNextShapes).toHaveBeenCalledOnce()
+    const [, fillNextValue] = editor.setStyleForNextShapes.mock.calls[0]
+    expect(fillNextValue).toBe('solid')
+  })
+
+  it('sets fill:none on selected shapes', () => {
+    run(editor, { type: 'STYLE_SHAPE', fill: 'none' })
+
+    const [, fillValue] = editor.setStyleForSelectedShapes.mock.calls[0]
+    expect(fillValue).toBe('none')
+  })
+
+  it('sets fill:semi on selected shapes', () => {
+    run(editor, { type: 'STYLE_SHAPE', fill: 'semi' })
+
+    const [, fillValue] = editor.setStyleForSelectedShapes.mock.calls[0]
+    expect(fillValue).toBe('semi')
+  })
+
+  it('sets fill:pattern on selected shapes', () => {
+    run(editor, { type: 'STYLE_SHAPE', fill: 'pattern' })
+
+    const [, fillValue] = editor.setStyleForSelectedShapes.mock.calls[0]
+    expect(fillValue).toBe('pattern')
+  })
+
+  it('sets dash style on selected shapes and next shapes', () => {
+    run(editor, { type: 'STYLE_SHAPE', dash: 'dotted' })
+
+    expect(editor.setStyleForSelectedShapes).toHaveBeenCalledOnce()
+    const [dashStyle, dashValue] = editor.setStyleForSelectedShapes.mock.calls[0]
+    expect(dashStyle.id).toBe('tldraw:dash')
+    expect(dashValue).toBe('dotted')
+    expect(editor.setStyleForNextShapes).toHaveBeenCalledOnce()
+    const [, dashNextValue] = editor.setStyleForNextShapes.mock.calls[0]
+    expect(dashNextValue).toBe('dotted')
+  })
+
+  it('sets dash:dashed on selected shapes', () => {
+    run(editor, { type: 'STYLE_SHAPE', dash: 'dashed' })
+
+    const [, dashValue] = editor.setStyleForSelectedShapes.mock.calls[0]
+    expect(dashValue).toBe('dashed')
+  })
+
+  it('sets dash:draw on selected shapes', () => {
+    run(editor, { type: 'STYLE_SHAPE', dash: 'draw' })
+
+    const [, dashValue] = editor.setStyleForSelectedShapes.mock.calls[0]
+    expect(dashValue).toBe('draw')
+  })
+
+  it('sets dash:solid on selected shapes', () => {
+    run(editor, { type: 'STYLE_SHAPE', dash: 'solid' })
+
+    const [, dashValue] = editor.setStyleForSelectedShapes.mock.calls[0]
+    expect(dashValue).toBe('solid')
+  })
+
+  it('sets opacity on selected shapes and next shapes', () => {
+    run(editor, { type: 'STYLE_SHAPE', opacity: 0.5 })
+
+    expect(editor.setOpacityForSelectedShapes).toHaveBeenCalledOnce()
+    const [opacityValue] = editor.setOpacityForSelectedShapes.mock.calls[0]
+    expect(opacityValue).toBe(0.5)
+    expect(editor.setOpacityForNextShapes).toHaveBeenCalledOnce()
+    const [opacityNextValue] = editor.setOpacityForNextShapes.mock.calls[0]
+    expect(opacityNextValue).toBe(0.5)
+  })
+
+  it('sets opacity:0 (fully transparent) on selected shapes', () => {
+    run(editor, { type: 'STYLE_SHAPE', opacity: 0 })
+
+    const [opacityValue] = editor.setOpacityForSelectedShapes.mock.calls[0]
+    expect(opacityValue).toBe(0)
+  })
+
+  it('sets opacity:1 (fully opaque) on selected shapes', () => {
+    run(editor, { type: 'STYLE_SHAPE', opacity: 1 })
+
+    const [opacityValue] = editor.setOpacityForSelectedShapes.mock.calls[0]
+    expect(opacityValue).toBe(1)
+  })
+
+  it('sets labelSize on selected shapes and next shapes', () => {
+    run(editor, { type: 'STYLE_SHAPE', labelSize: 'xl' })
+
+    expect(editor.setStyleForSelectedShapes).toHaveBeenCalledOnce()
+    const [sizeStyle, sizeValue] = editor.setStyleForSelectedShapes.mock.calls[0]
+    expect(sizeStyle.id).toBe('tldraw:size')
+    expect(sizeValue).toBe('xl')
+    expect(editor.setStyleForNextShapes).toHaveBeenCalledOnce()
+    const [, sizeNextValue] = editor.setStyleForNextShapes.mock.calls[0]
+    expect(sizeNextValue).toBe('xl')
+  })
+
+  it('sets labelSize:s on selected shapes', () => {
+    run(editor, { type: 'STYLE_SHAPE', labelSize: 's' })
+
+    const [, sizeValue] = editor.setStyleForSelectedShapes.mock.calls[0]
+    expect(sizeValue).toBe('s')
+  })
+
+  it('sets labelSize:m on selected shapes', () => {
+    run(editor, { type: 'STYLE_SHAPE', labelSize: 'm' })
+
+    const [, sizeValue] = editor.setStyleForSelectedShapes.mock.calls[0]
+    expect(sizeValue).toBe('m')
+  })
+
+  it('sets labelSize:l on selected shapes', () => {
+    run(editor, { type: 'STYLE_SHAPE', labelSize: 'l' })
+
+    const [, sizeValue] = editor.setStyleForSelectedShapes.mock.calls[0]
+    expect(sizeValue).toBe('l')
+  })
+
+  it('applies multiple style fields in a single action', () => {
+    run(editor, { type: 'STYLE_SHAPE', fill: 'solid', dash: 'dotted', opacity: 0.75 })
+
+    // setStyleForSelectedShapes called twice: once for fill, once for dash
+    expect(editor.setStyleForSelectedShapes).toHaveBeenCalledTimes(2)
+    expect(editor.setOpacityForSelectedShapes).toHaveBeenCalledOnce()
+    const [opacityValue] = editor.setOpacityForSelectedShapes.mock.calls[0]
+    expect(opacityValue).toBe(0.75)
+  })
+
+  it('does not call setOpacity when opacity is not provided', () => {
+    run(editor, { type: 'STYLE_SHAPE', color: 'red' })
+
+    expect(editor.setOpacityForSelectedShapes).not.toHaveBeenCalled()
+    expect(editor.setOpacityForNextShapes).not.toHaveBeenCalled()
   })
 })
 

@@ -382,17 +382,57 @@ function matchSingleCommand(segment: string, rawTranscript: string): ShapeComman
   }
 
   // 15. MOVE_SHAPE
-  if (/^(?:move|drag|shift|reposition|snap)\b/i.test(t)) {
+  if (/^(?:move|drag|shift|reposition|snap|nudge)\b/i.test(t)) {
     const position = extractPosition(t)
     const shapeType = extractShape(t)
     const color = extractColor(t)
     const ordinal = extractOrdinal(t)
     const shapeReference = buildShapeReference({ shapeType, color, ordinal })
-    if (position !== undefined) {
+
+    // Directional nudge: "move right", "move it left by 50", "nudge up 100px"
+    const NUDGE_BASE: Record<string, { dx?: number; dy?: number }> = {
+      right: { dx: 100 }, left: { dx: -100 },
+      up: { dy: -100 }, down: { dy: 100 },
+    }
+    const nudgeRe = /\b(right|left|up|down)\b/i.exec(t)
+    // Reject matches that are part of a compound position like "top-right"
+    const isCompoundPosition =
+      nudgeRe !== null &&
+      /\b(?:top|bottom|upper|lower)[-\s](?:right|left)\b/i.test(t)
+    const nudge = nudgeRe && !isCompoundPosition
+      ? NUDGE_BASE[nudgeRe[1].toLowerCase()]
+      : undefined
+
+    // Optional pixel distance: "by 50", "50px", "50 pixels"
+    let nudgeDist: number | undefined
+    if (nudge !== undefined) {
+      const distRe = /(?:by\s+)?(\d+(?:\.\d+)?)\s*(?:px|pixels?)?(?:\b|$)/i.exec(
+        // strip the direction word so "right 50" parses correctly
+        t.replace(/\b(right|left|up|down)\b/i, ''),
+      )
+      if (distRe) {
+        const d = parseFloat(distRe[1])
+        if (d > 0) nudgeDist = d
+      }
+    }
+
+    // Apply distance scaling to the nudge deltas
+    let dx: number | undefined
+    let dy: number | undefined
+    if (nudge !== undefined) {
+      const scale = nudgeDist !== undefined ? nudgeDist / 100 : 1
+      if (nudge.dx !== undefined) dx = nudge.dx * scale
+      if (nudge.dy !== undefined) dy = nudge.dy * scale
+    }
+
+    // Emit a MOVE_SHAPE when we have at least one of: position, nudge, or shapeReference
+    if (position !== undefined || dx !== undefined || dy !== undefined || shapeReference !== undefined) {
       return {
         intent: 'MOVE_SHAPE',
         ...(shapeType !== undefined ? { shapeType } : {}),
-        position,
+        ...(position !== undefined ? { position } : {}),
+        ...(dx !== undefined ? { dx } : {}),
+        ...(dy !== undefined ? { dy } : {}),
         ...(shapeReference !== undefined ? { shapeReference } : {}),
         rawTranscript,
       }
